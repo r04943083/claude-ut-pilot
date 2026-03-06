@@ -15,7 +15,7 @@
         "name": "r04943083",
         "email": ""
       },
-      "source": ".",
+      "source": "./plugins/ut-pilot",
       "category": "development",
       "homepage": "https://github.com/r04943083/claude-ut-pilot"
     }

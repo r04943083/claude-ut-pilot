@@ -1,0 +1,8 @@
+{
+  "name": "ut-pilot",
+  "description": "Automated unit test writer and coverage improver for C/C++ projects using Google Test, Catch2, or similar frameworks. Analyzes source files, writes comprehensive test cases, integrates with CMake, and drives coverage toward >90%.",
+  "author": {
+    "name": "r04943083",
+    "email": ""
+  }
+}

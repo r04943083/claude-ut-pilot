@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-ut-pilot",
+  "description": "Automated C/C++ unit test writer and coverage driver for Claude Code",
+  "owner": {
+    "name": "r04943083",
+    "email": ""
+  },
+  "plugins": [
+    {
+      "name": "ut-pilot",
+      "description": "Automated unit test writer and coverage improver for C/C++ projects using Google Test, Catch2, or similar frameworks. Analyzes source files, writes comprehensive test cases, integrates with CMake, and drives coverage toward >90%.",
+      "version": "1.0.0",
+      "author": {
+        "name": "r04943083",
+        "email": ""
+      },
+      "source": ".",
+      "category": "development",
+      "homepage": "https://github.com/r04943083/claude-ut-pilot"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ description: >
   integrates with CMake, and drives coverage toward >90%. Use this skill whenever the user
   wants to: write unit tests, increase test coverage, check coverage status, generate tests
   for untested files, or improve code coverage for any C/C++ project. Triggers on:
-  "/ut-pilot:init", "/ut-pilot:status", "/ut-pilot:continue", "/ut-pilot:target_src",
+  "/ut-pilot:init", "/ut-pilot:status", "/ut-pilot:continue", "/ut-pilot:path",
   "write unit tests", "increase coverage", "add tests for", "coverage status",
   "what needs tests", "continue coverage", "generate tests", or any mention of improving
   C++ test coverage. Even if the user says "keep going" or "continue" in the context of
@@ -25,7 +25,7 @@ Parse the user's input to determine which mode to run:
 
 | Command | Action |
 |---------|--------|
-| `/ut-pilot:target_src <path>` | Write tests for files in a specific source directory or file |
+| `/ut-pilot:path <path>` | Write tests for files in a specific source directory or file |
 | `/ut-pilot:continue` | Continue improving coverage from where you left off |
 | `/ut-pilot:status` | Show current coverage status |
 | `/ut-pilot:init` | Bootstrap UT infrastructure for a new project |
@@ -128,7 +128,7 @@ Classify uncovered files to help prioritize:
 
 ---
 
-## Mode: Target (`/ut-pilot:target_src <path>`)
+## Mode: Target (`/ut-pilot:path <path>`)
 
 1. Resolve `<path>` relative to the source root
 2. Find all source files (.h, .hh, .hpp, .cc, .cpp, .cxx) in that path

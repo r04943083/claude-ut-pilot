@@ -63,7 +63,7 @@ Pick one of these approaches:
 
 ```bash
 # Target a specific directory
-> /ut-pilot:target_src src/core/parser/
+> /ut-pilot:path src/core/parser/
 
 # Or let UT Pilot auto-pick the easiest uncovered files
 > /ut-pilot:continue
@@ -94,7 +94,7 @@ Just keep running `/ut-pilot:continue` to steadily increase coverage. Each run p
 |---------|-------------|
 | `/ut-pilot:init` | Bootstrap UT infrastructure for a new project |
 | `/ut-pilot:status` | Show coverage summary and next targets |
-| `/ut-pilot:target_src <path>` | Write tests for files in a specific directory or file |
+| `/ut-pilot:path <path>` | Write tests for files in a specific directory or file |
 | `/ut-pilot:continue` | Auto-pick next uncovered files and write tests |
 
 ## What It Does

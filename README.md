@@ -96,6 +96,7 @@ Just keep running `/ut-pilot:continue` to steadily increase coverage. Each run p
 | `/ut-pilot:status` | Show coverage summary and next targets |
 | `/ut-pilot:path <path>` | Write tests for files in a specific directory or file |
 | `/ut-pilot:continue` | Auto-pick next uncovered files and write tests |
+| `/ut-pilot:auto` | Loop continue automatically until all files reach >90% coverage |
 
 ## What It Does
 

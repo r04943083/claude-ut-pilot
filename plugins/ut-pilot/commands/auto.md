@@ -2,9 +2,7 @@
 description: "Automatically loop continue until all files reach >90% coverage"
 ---
 
-Read and follow the instructions in the skill file at `$PLUGIN_DIR/skills/ut-pilot/SKILL.md`.
-
-Execute Mode: Auto
+Use the ut-pilot skill to execute Auto mode.
 
 Repeat the Continue workflow in a loop:
 1. Run the Continue mode (pick next 3-5 uncovered files, write tests, build, verify)

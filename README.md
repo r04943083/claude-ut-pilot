@@ -34,7 +34,7 @@ claude install-skill ./claude-ut-pilot
 After installing, open Claude Code in any C/C++ project:
 
 ```
-> /ut-pilot init
+> /ut-pilot:init
 ```
 
 That's it. UT Pilot will scan your project, set up the test infrastructure, and write your first test.
@@ -44,7 +44,7 @@ That's it. UT Pilot will scan your project, set up the test infrastructure, and 
 ### Step 1: Initialize (first time only)
 
 ```
-> /ut-pilot init
+> /ut-pilot:init
 ```
 
 Bootstraps test infrastructure: creates test directory, CMakeLists.txt, coverage scripts, and a sample test. Only needed once per project.
@@ -52,7 +52,7 @@ Bootstraps test infrastructure: creates test directory, CMakeLists.txt, coverage
 ### Step 2: Check what needs testing
 
 ```
-> /ut-pilot status
+> /ut-pilot:status
 ```
 
 Shows a coverage summary: how many files are tested, which directories need work, and what to tackle next.
@@ -63,10 +63,10 @@ Pick one of these approaches:
 
 ```bash
 # Target a specific directory
-> /ut-pilot src/core/parser/
+> /ut-pilot:target_src src/core/parser/
 
 # Or let UT Pilot auto-pick the easiest uncovered files
-> /ut-pilot continue
+> /ut-pilot:continue
 ```
 
 UT Pilot will:
@@ -79,12 +79,12 @@ UT Pilot will:
 
 ### Step 4: Repeat
 
-Just keep running `/ut-pilot continue` to steadily increase coverage. Each run picks the next batch of files, writes tests, and reports progress.
+Just keep running `/ut-pilot:continue` to steadily increase coverage. Each run picks the next batch of files, writes tests, and reports progress.
 
 ```
-> /ut-pilot continue
-> /ut-pilot continue
-> /ut-pilot continue
+> /ut-pilot:continue
+> /ut-pilot:continue
+> /ut-pilot:continue
 ...
 ```
 
@@ -92,10 +92,10 @@ Just keep running `/ut-pilot continue` to steadily increase coverage. Each run p
 
 | Command | Description |
 |---------|-------------|
-| `/ut-pilot init` | Bootstrap UT infrastructure for a new project |
-| `/ut-pilot status` | Show coverage summary and next targets |
-| `/ut-pilot <path>` | Write tests for files in a specific directory or file |
-| `/ut-pilot continue` | Auto-pick next uncovered files and write tests |
+| `/ut-pilot:init` | Bootstrap UT infrastructure for a new project |
+| `/ut-pilot:status` | Show coverage summary and next targets |
+| `/ut-pilot:target_src <path>` | Write tests for files in a specific directory or file |
+| `/ut-pilot:continue` | Auto-pick next uncovered files and write tests |
 
 ## What It Does
 
@@ -113,7 +113,7 @@ Just keep running `/ut-pilot continue` to steadily increase coverage. Each run p
 - Supports **CMake**, with build system detection
 - Generates **lcov/gcov** coverage reports
 - **Smart prioritization**: easy files first, skips files needing complex mocking
-- **Incremental**: run `/ut-pilot continue` repeatedly to steadily increase coverage
+- **Incremental**: run `/ut-pilot:continue` repeatedly to steadily increase coverage
 - Handles common C++ gotchas: forward declarations, circular includes, template instantiation, logging dependencies
 
 ## Requirements
@@ -147,7 +147,7 @@ For each source file, UT Pilot:
 ```
 $ claude
 
-> /ut-pilot init
+> /ut-pilot:init
 Setting up test infrastructure for MyProject...
 Created tests/ut/CMakeLists.txt
 Created tests/ut/run_tests.sh
@@ -155,7 +155,7 @@ Created tests/ut/coverage.sh
 Created tests/ut/MyModule/Parser_test.cc (sample test)
 Built and verified: 1/1 tests passing.
 
-> /ut-pilot status
+> /ut-pilot:status
 MyProject Coverage Status:
   Total source files: 47
   Tested (>90%):      1
@@ -167,7 +167,7 @@ MyProject Coverage Status:
 
 Next targets: Config.h, Types.h, Token.h (header-only, no dependencies)
 
-> /ut-pilot continue
+> /ut-pilot:continue
 Writing tests for 5 files...
   [OK] Config.h       -> Config_test.cc       (100%)
   [OK] Types.h        -> Types_test.cc        (100%)
@@ -178,7 +178,7 @@ Writing tests for 5 files...
 All 6 tests passing. Coverage: 6/47 files at >90%.
 Next targets: Parser.cc, Lexer.cc, AST.cc
 
-> /ut-pilot continue
+> /ut-pilot:continue
 ...
 ```
 

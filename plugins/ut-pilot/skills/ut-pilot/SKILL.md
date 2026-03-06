@@ -6,7 +6,8 @@ description: >
   integrates with CMake, and drives coverage toward >90%. Use this skill whenever the user
   wants to: write unit tests, increase test coverage, check coverage status, generate tests
   for untested files, or improve code coverage for any C/C++ project. Triggers on:
-  "/ut-pilot", "write unit tests", "increase coverage", "add tests for", "coverage status",
+  "/ut-pilot:init", "/ut-pilot:status", "/ut-pilot:continue", "/ut-pilot:target_src",
+  "write unit tests", "increase coverage", "add tests for", "coverage status",
   "what needs tests", "continue coverage", "generate tests", or any mention of improving
   C++ test coverage. Even if the user says "keep going" or "continue" in the context of
   UT work, use this skill.
@@ -24,10 +25,10 @@ Parse the user's input to determine which mode to run:
 
 | Command | Action |
 |---------|--------|
-| `/ut-pilot <path>` | Write tests for files in a specific source directory or file |
-| `/ut-pilot continue` | Continue improving coverage from where you left off |
-| `/ut-pilot status` | Show current coverage status |
-| `/ut-pilot init` | Bootstrap UT infrastructure for a new project |
+| `/ut-pilot:target_src <path>` | Write tests for files in a specific source directory or file |
+| `/ut-pilot:continue` | Continue improving coverage from where you left off |
+| `/ut-pilot:status` | Show current coverage status |
+| `/ut-pilot:init` | Bootstrap UT infrastructure for a new project |
 
 If no subcommand is recognized, treat the entire input as a target path.
 
@@ -85,7 +86,7 @@ Tell the user what you found and confirm before proceeding.
 
 ---
 
-## Mode: Init (`/ut-pilot init`)
+## Mode: Init (`/ut-pilot:init`)
 
 Bootstrap UT infrastructure for a project that has none. Create:
 
@@ -103,7 +104,7 @@ Ask the user to confirm the plan before creating files.
 
 ---
 
-## Mode: Status (`/ut-pilot status`)
+## Mode: Status (`/ut-pilot:status`)
 
 1. Check if a coverage tracking file exists (TODO.md, coverage report, etc.)
 2. If coverage data exists, parse and summarize:
@@ -127,7 +128,7 @@ Classify uncovered files to help prioritize:
 
 ---
 
-## Mode: Target (`/ut-pilot <path>`)
+## Mode: Target (`/ut-pilot:target_src <path>`)
 
 1. Resolve `<path>` relative to the source root
 2. Find all source files (.h, .hh, .hpp, .cc, .cpp, .cxx) in that path
@@ -137,7 +138,7 @@ Classify uncovered files to help prioritize:
 
 ---
 
-## Mode: Continue (`/ut-pilot continue`)
+## Mode: Continue (`/ut-pilot:continue`)
 
 1. Read coverage data to find uncovered files
 2. Sort by difficulty (Easy first)

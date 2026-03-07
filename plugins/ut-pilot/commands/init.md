@@ -20,32 +20,37 @@ Scan the project silently (no output yet). Detect:
 
 Also check if `UT_RULES.md` already exists (re-init scenario).
 
-## Step 2: Ask for Configuration Confirmation
+## Step 2: Confirm Configuration
 
-First, print the detected configuration as a table:
+First, print ALL auto-detected settings so the user can see them:
 
 ```
-I detected the following configuration:
+Auto-detected configuration:
 
 | Setting           | Detected Value          | Notes                          |
 |-------------------|------------------------|--------------------------------|
 | source_root       | /path/to/src           | (from $ARGUMENTS or auto-scan) |
-| test_root         | /path/to/tests/ut      |                                |
-| module            | ModuleName             | top-level module name          |
-| framework         | gtest                  |                                |
-| coverage_tool     | lcov                   |                                |
-| naming_convention | {FileName}_ut.cc       |                                |
-| build_system      | cmake                  |                                |
-| parallel_agents   | 3                      | agents to spawn per continue   |
-| files_per_batch   | 5                      | files handled per continue     |
-| strategy          | complex-first          | complex-first / medium-first / simple-first |
+| test_root         | /path/to/tests/ut      | (default, no existing test dir)|
+| module            | ModuleName             | from CMake project()           |
+| build_system      | cmake                  | CMakeLists.txt found           |
+| framework         | gtest                  | (default or detected)          |
+| coverage_tool     | lcov                   | lcov found on system           |
+| naming_convention | {FileName}_ut.cc       | (default, no existing tests)   |
+| parallel_agents   | 3                      |                                |
+| files_per_batch   | 5                      |                                |
+| strategy          | complex-first          |                                |
 ```
 
-Then use the **`AskUserQuestion`** tool to ask:
+Then use **one** `AskUserQuestion` call to ask these 4 key settings:
 
-> Please confirm this configuration, or tell me which values to change.
+1. **source_root** — `<detected_path> (Recommended)`, plus any other candidate directories found (e.g., `source/`, `lib/`). Header: "Source root"
+2. **parallel_agents** — `3 (Recommended)`, `1`, `5`. Header: "Agents"
+3. **files_per_batch** — `5 (Recommended)`, `3`, `10`. Header: "Batch size"
+4. **strategy** — `complex-first (Recommended)`, `simple-first`, `medium-first`. Header: "Strategy"
 
-**Wait for the user's response before proceeding.** Do not create any files or run any commands until the user replies.
+**Wait for user response.** Apply any changes to the detected values.
+
+Then print the final confirmed configuration table and continue to Step 3.
 
 ## Step 3: Apply Changes and Execute (after user confirms)
 

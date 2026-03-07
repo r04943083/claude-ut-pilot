@@ -30,23 +30,23 @@ Auto-detected configuration:
 | Setting           | Detected Value          | Notes                          |
 |-------------------|------------------------|--------------------------------|
 | source_root       | /path/to/src           | (from $ARGUMENTS or auto-scan) |
-| test_root         | /path/to/tests/ut      | (default, no existing test dir)|
+| test_root         | /path/to/tests/ut      | (default, or existing test dir)|
 | module            | ModuleName             | from CMake project()           |
 | build_system      | cmake                  | CMakeLists.txt found           |
 | framework         | gtest                  | (default or detected)          |
 | coverage_tool     | lcov                   | lcov found on system           |
-| naming_convention | {FileName}_ut.cc       | (default, no existing tests)   |
-| parallel_agents   | 3                      |                                |
-| files_per_batch   | 5                      |                                |
-| strategy          | complex-first          |                                |
+| naming_convention | {FileName}_ut.cc       | (default, or from existing tests) |
+| parallel_agents   | 3                      | concurrent agents per batch    |
+| files_per_batch   | 5                      | files processed per batch      |
+| strategy          | complex-first          | complex-first / medium-first / simple-first |
 ```
 
 Then use **one** `AskUserQuestion` call to ask these 4 key settings:
 
 1. **source_root** — `<detected_path> (Recommended)`, plus any other candidate directories found (e.g., `source/`, `lib/`). Header: "Source root"
-2. **parallel_agents** — `3 (Recommended)`, `1`, `5`. Header: "Agents"
-3. **files_per_batch** — `5 (Recommended)`, `3`, `10`. Header: "Batch size"
-4. **strategy** — `complex-first (Recommended)`, `simple-first`, `medium-first`. Header: "Strategy"
+2. **test_root** — `<detected_path> (Recommended)`, plus alternatives like `tests/`, `test/ut/`, `test/`. Header: "Test root"
+3. **parallel_agents** — `3 (Recommended)`, `1`, `5`. Header: "Agents"
+4. **files_per_batch** — `5 (Recommended)`, `3`, `10`. Header: "Batch size"
 
 **Wait for user response.** Apply any changes to the detected values.
 

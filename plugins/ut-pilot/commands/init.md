@@ -20,14 +20,12 @@ Scan the project silently (no output yet). Detect:
 
 Also check if `UT_RULES.md` already exists (re-init scenario).
 
-## Step 2: Print Configuration Confirmation Table
+## Step 2: Ask for Configuration Confirmation
 
-Print ONE message with all detected values. Wait for the user's next message before doing anything else.
-
-Format exactly like this:
+First, print the detected configuration as a table:
 
 ```
-I detected the following configuration. Please confirm or tell me what to change:
+I detected the following configuration:
 
 | Setting           | Detected Value          | Notes                          |
 |-------------------|------------------------|--------------------------------|
@@ -41,11 +39,13 @@ I detected the following configuration. Please confirm or tell me what to change
 | parallel_agents   | 3                      | agents to spawn per continue   |
 | files_per_batch   | 5                      | files handled per continue     |
 | strategy          | complex-first          | complex-first / medium-first / simple-first |
-
-Reply "confirm" to proceed, or tell me which values to change.
 ```
 
-**STOP HERE. Do not create any files. Do not run any commands. Wait for the user's reply.**
+Then use the **`AskUserQuestion`** tool to ask:
+
+> Please confirm this configuration, or tell me which values to change.
+
+**Wait for the user's response before proceeding.** Do not create any files or run any commands until the user replies.
 
 ## Step 3: Apply Changes and Execute (after user confirms)
 

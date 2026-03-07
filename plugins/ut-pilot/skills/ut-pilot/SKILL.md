@@ -13,330 +13,265 @@ description: >
   UT work, use this skill.
 ---
 
-# UT Pilot -- Automated C/C++ Unit Test & Coverage
+# UT Pilot — Technical Reference
 
-You are an automated unit test writer for C/C++ projects. You analyze source code,
-write comprehensive Google Test (or other framework) tests, integrate them into the
-build system, and iteratively drive line coverage toward >90%.
-
-## Commands
-
-Parse the user's input to determine which mode to run:
-
-| Command | Action |
-|---------|--------|
-| `/ut-pilot:path <path>` | Write tests for files in a specific source directory or file |
-| `/ut-pilot:continue` | Continue improving coverage from where you left off |
-| `/ut-pilot:status` | Show current coverage status |
-| `/ut-pilot:auto` | Loop continue automatically until all files reach >90% coverage |
-| `/ut-pilot:init` | Bootstrap UT infrastructure for a new project |
-
-If no subcommand is recognized, treat the entire input as a target path.
-
----
-
-## Phase 0: Project Discovery
-
-Before doing anything, understand the project. This runs automatically on first use.
-
-### Step 1: Detect project layout
-
-Look for these signals (check in parallel):
-
-```
-CMakeLists.txt          -- CMake project?
-Makefile / Makefile.am  -- Make/Autotools?
-BUILD / BUILD.bazel     -- Bazel?
-meson.build             -- Meson?
-```
-
-Also check:
-- Existing test directories: `tests/`, `test/`, `ut/`, `unittest/`, `*_test/`
-- Existing test framework: grep for `gtest`, `catch2`, `doctest`, `boost_test` in CMakeLists or source
-- Coverage tooling: `.lcovrc`, `gcov`, `coverage.sh`, `.codecov.yml`
-- CI config: `.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`
-
-### Step 2: Check for project-specific UT docs
-
-Look for documentation that describes the project's test conventions:
-
-```
-README.md, TESTING.md, CONTRIBUTING.md    -- in project root
-tests/README.md, tests/UT_RULES.md       -- in test directories
-TODO.md                                    -- coverage tracking
-```
-
-If found, read them. They override any defaults below -- the project knows best.
-
-### Step 3: Establish the configuration
-
-Based on discovery, determine:
-
-| Config | How to detect | Default |
-|--------|--------------|---------|
-| **Test framework** | grep includes/CMake find_package | Google Test |
-| **Build system** | Root build files | CMake |
-| **Source root** | `src/`, `source/`, `lib/` | `src/` |
-| **Test root** | Existing test dir | `tests/ut/` |
-| **Coverage tool** | lcov/gcov/llvm-cov presence | lcov + gcov |
-| **Naming convention** | Existing test files | `{FileName}_test.cc` or `{FileName}_ut.cc` |
-| **Test directory layout** | Mirror source tree vs flat | Mirror source tree |
-| **Namespace** | grep `namespace` in source | auto-detect |
-
-Tell the user what you found and confirm before proceeding.
-
----
-
-## Mode: Init (`/ut-pilot:init`)
-
-Bootstrap UT infrastructure for a project that has none. Create:
-
-1. **Test directory** matching the project convention
-2. **CMakeLists.txt** for tests (standalone, does not modify main build)
-   - `cmake_minimum_required`, `project(ProjectName_UnitTests)`
-   - `find_package(GTest REQUIRED)` (or other framework)
-   - Coverage option: `option(ENABLE_COVERAGE "Enable coverage" OFF)`
-   - Coverage flags when enabled
-3. **run_tests.sh** -- build and run tests
-4. **coverage.sh** -- build with coverage, run, capture lcov, generate HTML report
-5. **A sample test** for the simplest source file found
-
-Ask the user to confirm the plan before creating files.
-
----
-
-## Mode: Status (`/ut-pilot:status`)
-
-1. Check if a coverage tracking file exists (TODO.md, coverage report, etc.)
-2. If coverage data exists, parse and summarize:
-   - Total source files vs tested files
-   - Coverage % per directory
-   - List uncovered files grouped by difficulty
-3. If no coverage data, run coverage collection first:
-   ```bash
-   cd <test_dir> && bash coverage.sh
-   ```
-4. Present results as a table
-
-### Difficulty Classification
-
-Classify uncovered files to help prioritize:
-
-- **Easy**: Header-only (no .cc), few dependencies, simple classes (data structs, configs)
-- **Medium**: Has .cc file but manageable dependencies (can be compiled in isolation)
-- **Hard**: Deep dependency chains, needs database/network/filesystem mocking
-- **Skip**: Requires full system context, integration-level dependencies, or external services
-
----
-
-## Mode: Target (`/ut-pilot:path <path>`)
-
-1. Resolve `<path>` relative to the source root
-2. Find all source files (.h, .hh, .hpp, .cc, .cpp, .cxx) in that path
-3. Identify which ones lack tests (no corresponding test file, or test file exists but coverage <90%)
-4. For each file, run the **Write Test Workflow**
-5. After all tests pass, run coverage and report results
-
----
-
-## Mode: Continue (`/ut-pilot:continue`)
-
-1. Read coverage data to find uncovered files
-2. Sort by difficulty (Easy first)
-3. Pick next 3-5 files
-4. For each, run the **Write Test Workflow**
-5. Run coverage and report progress
+This skill provides shared technical knowledge for writing C++ unit tests. Command-specific
+behavior (init, continue, auto, path, status) is defined in each command's `.md` file.
+This file is referenced by agents spawned during parallel test writing.
 
 ---
 
 ## Write Test Workflow
 
-### Step 1: Read and understand the source
+### Step 1: Read and Understand the Source
 
-Read the header (.h/.hh/.hpp) and implementation (.cc/.cpp) files. Note:
+Read both the header (`.h`/`.hh`/`.hpp`) and implementation (`.cc`/`.cpp`) files. Identify:
 
 - **Class name and namespace**
 - **Constructors**: default, parameterized, copy, move
 - **Public API**: every public method signature
 - **Enums and type aliases**
-- **Dependencies**: what it includes, what it forward-declares
-- **Logging**: does it use LOG_*, spdlog, printf, etc.? (affects link dependencies)
+- **Dependencies**: what headers are included, what is forward-declared
+- **Logging**: does it use `LOG_*`, spdlog, printf? (affects link dependencies)
 - **Templates**: are there template specializations to test?
-- **Static/free functions**: in .cc files, these need tests too
+- **Static/free functions** in `.cc` files (need tests too)
 
-### Step 2: Plan the test file
+If LSP is available:
+- Use `document symbols` to list all class methods without parsing headers manually
+- Use `go to definition` on forward-declared types to confirm their actual type before writing tests
+- Use `find references` to understand how a class is used across the project
+
+### Step 2: Plan the Test File
 
 Determine:
 
-- **Test file path**: mirror the source path in the test directory
-- **Includes needed**: the header under test, plus any dependency headers
-  - Watch for forward declarations -- if class A forward-declares class B,
-    you must `#include "B.h"` before `#include "A.h"` in the test
-- **Link dependencies**: .cc files that need to be compiled, libraries to link
-- **CMake changes**: what needs to be added to CMakeLists.txt
+- **Test file path**: mirror source path under `test_root`
+- **Naming**: apply `naming_convention` from `UT_RULES.md` (default: `{FileName}_ut.cc`)
+- **Includes needed**: the header under test + dependency headers
+  - If class A forward-declares class B, `#include "B.h"` BEFORE `#include "A.h"` in the test
+- **Link dependencies**: list of `.cc` files that must be compiled together, and any libraries
+- **CMake entry**: what to add to `CMakeLists.txt`
 
-### Step 3: Write comprehensive tests
+### Step 3: Write Comprehensive Tests
 
-Write a test file targeting >90% line coverage. Structure:
+Target >90% line coverage. Structure:
 
 ```cpp
-#include <gtest/gtest.h>  // or catch2, etc.
+#include <gtest/gtest.h>
 
-// Dependency headers BEFORE the file under test (for forward declarations)
+// Dependency headers BEFORE the file under test (resolves forward declarations)
 #include "Dependency.h"
 #include "FileUnderTest.h"
 
 using namespace the_namespace;
 
-// Test group: Construction
+// --- Construction ---
 TEST(ClassNameTest, DefaultConstructor) {
   ClassName obj;
-  // Verify all default values
+  EXPECT_EQ(obj.get_field(), default_value);
 }
 
 TEST(ClassNameTest, ParameterizedConstructor) {
-  ClassName obj(args...);
-  // Verify initialized values
+  ClassName obj(arg1, arg2);
+  EXPECT_EQ(obj.get_field(), arg1);
 }
 
-// Test group: Getters and Setters
+// --- Getters / Setters ---
 TEST(ClassNameTest, SetAndGetField) {
   ClassName obj;
-  obj.set_field(value);
-  EXPECT_EQ(obj.get_field(), value);
+  obj.set_field(42);
+  EXPECT_EQ(obj.get_field(), 42);
 }
 
-// Test group: Business Logic (the important part for coverage)
-TEST(ClassNameTest, MethodBehavior) {
-  // Setup
+// --- Business Logic (primary coverage target) ---
+TEST(ClassNameTest, MethodWithBranch_TruePath) {
+  // Setup for the if-branch
   // Action
   // Verify
 }
 
-// Test group: Edge Cases
+TEST(ClassNameTest, MethodWithBranch_FalsePath) {
+  // Setup for the else-branch
+  // Action
+  // Verify
+}
+
+// --- Edge Cases ---
 TEST(ClassNameTest, EmptyInput) { ... }
-TEST(ClassNameTest, NullPointer) { ... }
 TEST(ClassNameTest, BoundaryValues) { ... }
 
-// Test group: Enum Coverage
+// --- Enum Coverage ---
 TEST(ClassNameTest, AllEnumValues) {
-  // Test each enum value in switch statements
+  // Test each enum value in switch statements to hit every case
 }
 ```
 
-**Coverage strategy -- what actually moves the needle:**
+**Coverage strategy:**
 
-1. **Don't just test getters/setters.** They're easy to write but the .cc file methods
-   are where the uncovered lines live. Focus on methods with logic: conditionals, loops,
-   switch statements, error paths.
+1. Business logic methods in `.cc` are where uncovered lines live — prioritize those over getters/setters
+2. Hit every branch: write a separate test for each path through `if/else` and each `switch` case
+3. Error paths: if there's a `LOG_ERROR` or early return, write a test that triggers it
+4. Templates: instantiate with at least 2 concrete types
+5. Do not rely on implementation details — test through the public API
 
-2. **Hit every branch.** If a method has `if/else`, write tests for both paths.
-   If it has a switch, test every case (including default).
+### Step 4: Integrate with CMake
 
-3. **Error paths matter.** If there's a `LOG_ERROR` or early return on invalid input,
-   write a test that triggers it.
+Read the existing `CMakeLists.txt` in the test directory and **match its style exactly**. If the project uses custom macros, use them.
 
-4. **Template instantiation.** Templates only generate code when instantiated. Test with
-   the concrete types the project actually uses.
+**Standard patterns:**
 
-### Step 4: Integrate with build system
-
-**CMake pattern** -- adapt to what the project uses:
-
-For header-only tests:
+Header-only (no `.cc` needed):
 ```cmake
-add_executable(FileName_test FileName_test.cc)
-target_include_directories(FileName_test PRIVATE ${INCLUDE_DIRS})
-target_link_libraries(FileName_test GTest::gtest_main pthread)
-add_test(NAME FileName_test COMMAND FileName_test)
+add_executable(FileName_ut FileName_ut.cc)
+target_include_directories(FileName_ut PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(FileName_ut GTest::gtest_main pthread)
+add_test(NAME FileName_ut COMMAND FileName_ut)
 ```
 
-For tests needing .cc compilation:
+With implementation file:
 ```cmake
-add_executable(FileName_test FileName_test.cc ${SRC_DIR}/FileName.cc ${SRC_DIR}/Dep.cc)
-target_include_directories(FileName_test PRIVATE ${INCLUDE_DIRS})
-target_link_libraries(FileName_test GTest::gtest_main pthread additional_libs)
-add_test(NAME FileName_test COMMAND FileName_test)
+add_executable(FileName_ut FileName_ut.cc ${SRC_ROOT}/FileName.cc ${SRC_ROOT}/Dep.cc)
+target_include_directories(FileName_ut PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(FileName_ut GTest::gtest_main pthread)
+add_test(NAME FileName_ut COMMAND FileName_ut)
 ```
 
-If the project uses shared object/library targets (OBJECT libraries, static libs, etc.),
-prefer linking against those rather than recompiling .cc files.
+Using project macros (`ut_add_module_sources` / `ut_add_test` if defined):
+```cmake
+ut_add_test(FileName_ut FileName_ut.cc)
+ut_add_module_sources(FileName_ut ${SRC_ROOT}/FileName.cc)
+target_link_libraries(FileName_ut GTest::gtest_main pthread)
+```
 
-**Look at existing CMakeLists.txt patterns in the test directory.** Match the style.
-If the project uses custom macros, use them.
+If source is compiled into an OBJECT library or static lib target, link against that instead of re-listing `.cc` files.
 
-### Step 5: Build and verify
+### Step 5: Build and Verify
 
 ```bash
 cd <test_build_dir> && cmake .. && make -j$(nproc) && ctest --output-on-failure
 ```
 
-**ALL tests must pass** -- not just the new ones. If a test fails:
+ALL tests must pass — not just new ones. Fix errors before moving on.
 
-| Error | Fix |
-|-------|-----|
-| Missing include / undeclared identifier | Add the required `#include` |
-| Undefined reference (linker error) | Add .cc to sources or library to link |
-| Undefined reference to logging symbols | Link the logging library (glog, spdlog, etc.) |
-| Forward declaration incomplete type | Include the forward-declared type's header before the header under test |
-| Circular include | Find the correct include order (check existing test files for patterns) |
-| Segfault / ASAN error | Don't dereference null; use proper object construction |
-
-Fix and rebuild until all tests pass. Do not move on with failing tests.
-
-### Step 6: Check coverage
-
-After the batch is done:
+### Step 6: Check Coverage per File
 
 ```bash
-cd <test_build_dir> && bash coverage.sh  # or equivalent
+cd <test_build_dir> && bash coverage.sh
 ```
 
-For each newly-tested file, verify >90% line coverage. If below:
-1. Check the HTML coverage report for uncovered lines
-2. Add tests for uncovered branches/methods
-3. Rebuild and re-check
+For each file you wrote tests for: verify >90% line coverage. If below:
+1. Check the HTML report for which lines are uncovered
+2. Write targeted tests for those branches
+3. Rebuild and recheck (max 2 iterations)
 
 ---
 
-## Reporting
+## Error Fix Reference
 
-After each session, report:
+| Error | Root Cause | Fix |
+|-------|-----------|-----|
+| `error: incomplete type` | Forward-declared type used before its header is included | Add `#include "TypeName.h"` BEFORE the header under test |
+| `undefined reference to 'ClassName::method'` | `.cc` not compiled | Add `ClassName.cc` to `target_sources` or the executable sources list |
+| `undefined reference to 'google::...log...'` | Logging library not linked | Add `glog` or `spdlog` to `target_link_libraries` |
+| `undefined reference to 'pthread_...'` | pthread not linked | Add `pthread` to `target_link_libraries` |
+| `error: 'X' was not declared` | Missing include | Add the required `#include` |
+| Segfault / ASAN null-deref | Dereferencing uninitialized pointer | Construct proper objects; don't pass nullptr unless testing null handling |
+| `cannot instantiate abstract class` | Class has pure virtual methods | Create a minimal concrete subclass in the test file for testing |
+| Test links but coverage is 0% | Build and test binary are different; coverage not enabled | Ensure test was built with `ENABLE_COVERAGE=ON` flag |
 
+---
+
+## Coverage Operations
+
+### Generate coverage report
+```bash
+cd <build_dir>
+cmake .. -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+make -j$(nproc)
+ctest --output-on-failure
+lcov --capture --directory . --output-file coverage.info
+lcov --remove coverage.info '/usr/*' '*/gtest/*' '*/gmock/*' --output-file coverage_filtered.info
+genhtml coverage_filtered.info --output-directory coverage_report/
 ```
-## Coverage Progress
 
-| File | Before | After | Status |
-|------|--------|-------|--------|
-| Foo.hh | 0% | 100% | NEW |
-| Bar.cc | 45% | 92% | IMPROVED |
+### Check a specific file's coverage
+```bash
+lcov --list coverage_filtered.info | grep "FileName"
+```
 
-**Summary**: Added tests for 5 files. Coverage: 57 -> 62 files at >90%.
-**Next targets**: List 3-5 files to tackle next time.
+### View uncovered lines
+Open `coverage_report/path/to/FileName.cc.gcov.html` in a browser, or:
+```bash
+gcov -b -c FileName.cc  # shows branch coverage in terminal
 ```
 
 ---
 
-## Tips for Specific Patterns
+## Patterns for Specific C++ Constructs
 
-### Data classes (structs with getters/setters)
-Fast to test, low value for coverage. Write a quick test per class covering all
-fields and move on. These are "easy wins" for coverage numbers.
+### Data classes (structs/classes with getters/setters)
+Write one test per field: set + get. Fast to write, guarantees at least some coverage.
+Then focus on any validation logic in setters.
 
 ### Config/parameter classes
-Similar to data classes. Test defaults, setters, and any validation logic.
+Test defaults in one test. Test each setter. Test any `validate()` or `apply()` method with
+both valid and invalid inputs.
 
-### Algorithm/logic classes
-High value. Read the .cc carefully, test each code path. Use concrete examples
-with known expected outputs.
-
-### Database/manager classes with deep dependencies
-Often need integration-level setup. If the class takes a "database" or "context" object
-in its constructor and you can't construct one in isolation, skip it and note it in the
-report. Don't waste time fighting dependency chains.
+### Abstract base classes / interfaces
+Create a minimal concrete implementation in the test file:
+```cpp
+class ConcreteImpl : public AbstractBase {
+ public:
+  void pure_virtual_method() override { /* minimal */ }
+};
+TEST(AbstractBaseTest, Construction) {
+  ConcreteImpl impl;
+  // test methods defined on AbstractBase
+}
+```
 
 ### Template classes
-Instantiate with at least 2 types (e.g., int32_t and double) to catch type-specific issues.
+Instantiate with at least two types:
+```cpp
+TYPED_TEST_SUITE(ContainerTest, ::testing::Types<int, double>);
+TYPED_TEST(ContainerTest, Insert) { ... }
+```
+Or just write explicit tests with two types if `TYPED_TEST` is overkill.
 
 ### Classes with file I/O
-Use temp files or mock the I/O. Don't depend on specific files existing on disk.
+Use `std::tmpnam` or create files in `/tmp/`:
+```cpp
+TEST(FileReaderTest, ReadsCorrectly) {
+  auto tmp = std::string(std::tmpnam(nullptr));
+  { std::ofstream f(tmp); f << "test content\n"; }
+  FileReader reader(tmp);
+  EXPECT_EQ(reader.read_line(), "test content");
+  std::remove(tmp.c_str());
+}
+```
+
+### Classes with deep system dependencies (DB / full context)
+If the constructor requires a database object that cannot be constructed in isolation:
+- Mark the file as `[Skip]` in `TODO.md`
+- Note in `UT_RULES.md ## Project Gotchas` what infrastructure would be needed
+- Do not waste time fighting the dependency chain
+
+---
+
+## Difficulty Classification
+
+Use this to classify files for strategy scoring:
+
+| Difficulty | Criteria |
+|-----------|---------|
+| **Easy** | Header-only (no `.cc`), or `.cc` <50 lines, few internal includes |
+| **Medium** | Has `.cc`, 50-150 lines, <5 internal includes, no system-level deps |
+| **Hard** | Has `.cc`, >150 lines, many internal includes, some system deps but mockable |
+| **Skip** | Requires database/full-system context in constructor, external services, or integration-level setup |
+
+Complexity score for **complex-first**:
+- Has `.cc`: +2
+- `.cc` >100 lines: +1
+- Uncovered lines above median for the module: +1
+- Internal includes >6: +1 (capped at +2 total for this)
+- System-level dependency: mark Skip

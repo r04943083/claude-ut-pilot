@@ -45,13 +45,23 @@ Record in `UT_RULES.md ## Project Gotchas`:
 Applies to `.hh`/`.h` files containing only class declarations and method signatures,
 with no inline method bodies (`{ ... }`) and no data-member initializers with values.
 
-gcov never instruments non-executable declaration lines — 0% coverage is expected and correct.
-No tests are needed; coverage for these lines comes automatically when the matching `.cc` is tested.
+gcov does not instrument pure declarations, but these headers are still **testable** —
+instantiation tests verify constructors, default values, and type correctness. Use the
+`#define private public` pattern to access all members.
 
-**Action**: Record in `UT_RULES.md ## Project Gotchas`:
+**Action**: Write instantiation/construction tests:
+```cpp
+TEST(ClassNameTest, DefaultConstruction) {
+  ClassName obj;
+  // verify default member values, sizeof, type traits
+}
+TEST(ClassNameTest, FieldAccess) {
+  ClassName obj;
+  obj.field_ = value;  // direct access via #define private public
+  EXPECT_EQ(obj.field_, value);
+}
 ```
-- [DeclOnly] FileName.hh — declaration-only header; no inline bodies
-```
+Do **not** record in `## Project Gotchas` — these files are normal test targets.
 
 ### [BuildFail] — Compilation Fails
 
@@ -92,9 +102,9 @@ Files with [MaxCov] are excluded by the auto/continue loop just like [BuildFail]
 
 **For files >200 lines**: Use LSP before reading the full file:
 1. `document_symbols` on the `.hh`/`.cc` → get method list and signatures
-2. From method names, identify which are public and have non-trivial implementation
+2. From method names, identify methods with non-trivial implementation
 3. Read only those sections (use offset+limit in the Read tool)
-4. Focus test writing on those methods; skip private/unreachable utility code
+4. Focus test writing on those methods — private methods are accessible via `#define private public`
 
 This avoids reading thousands of lines to find 10 testable methods.
 
@@ -122,6 +132,7 @@ Determine:
 - **Naming**: apply `naming_convention` from `UT_RULES.md` (default: `{FileName}_ut.cc`)
 - **Includes needed**: the header under test + dependency headers
   - If class A forward-declares class B, `#include "B.h"` BEFORE `#include "A.h"` in the test
+  - When `#include` can't be found under `source_root`, search under the `project` path from UT_RULES.md
 - **Link dependencies**: list of `.cc` files that must be compiled together, and any libraries
 - **CMake entry**: what to add to `CMakeLists.txt`
 
@@ -131,29 +142,36 @@ Target >90% line coverage. Structure:
 
 ```cpp
 #include <gtest/gtest.h>
+// ALL system/STL/third-party includes BEFORE the #define block
+#include <string>
+#include <vector>
 
+#define private public
+#define protected public
 // Dependency headers BEFORE the file under test (resolves forward declarations)
 #include "Dependency.h"
 #include "FileUnderTest.h"
+#undef private
+#undef protected
 
 using namespace the_namespace;
 
 // --- Construction ---
 TEST(ClassNameTest, DefaultConstructor) {
   ClassName obj;
-  EXPECT_EQ(obj.get_field(), default_value);
+  EXPECT_EQ(obj.field_, default_value);  // direct member access OK
 }
 
 TEST(ClassNameTest, ParameterizedConstructor) {
   ClassName obj(arg1, arg2);
-  EXPECT_EQ(obj.get_field(), arg1);
+  EXPECT_EQ(obj.field_, arg1);
 }
 
-// --- Getters / Setters ---
+// --- Direct Member Access ---
 TEST(ClassNameTest, SetAndGetField) {
   ClassName obj;
-  obj.set_field(42);
-  EXPECT_EQ(obj.get_field(), 42);
+  obj.field_ = 42;
+  EXPECT_EQ(obj.field_, 42);
 }
 
 // --- Business Logic (primary coverage target) ---
@@ -163,6 +181,13 @@ TEST(ClassNameTest, MethodWithBranch_TruePath) {
 
 TEST(ClassNameTest, MethodWithBranch_FalsePath) {
   // Setup for the else-branch → action → verify
+}
+
+// --- Private Methods (accessible via #define) ---
+TEST(ClassNameTest, PrivateHelperMethod) {
+  ClassName obj;
+  auto result = obj.private_helper(input);  // direct call OK
+  EXPECT_EQ(result, expected);
 }
 
 // --- Edge Cases ---
@@ -181,7 +206,7 @@ TEST(ClassNameTest, AllEnumValues) {
 2. Hit every branch: write a separate test for each path through `if/else` and `switch`
 3. Error paths: if there is a `LOG_ERROR` or early return, write a test that triggers it
 4. Templates: instantiate with at least 2 concrete types
-5. Test through the public API — do not depend on internal implementation details
+5. Use `#define private public` to access all members — test private methods and state directly when it improves coverage
 
 ### Step 4: Integrate with CMake
 
@@ -283,6 +308,49 @@ For each file you wrote tests for: verify >90% line coverage. If below:
 | Segfault / ASAN null-deref | Dereferencing uninitialized pointer | Construct proper objects; avoid passing nullptr unless testing null handling |
 | `cannot instantiate abstract class` | Class has pure virtual methods | Create a minimal concrete subclass in the test file for testing |
 | Test links but coverage is 0% | Coverage instrumentation not enabled at build time | Ensure test was built with `ENABLE_COVERAGE=ON` |
+| `#include "X.h"` not found | Header outside source_root | Search under `project` path: `find <project> -name "X.h"` |
+
+---
+
+## Private Access Pattern
+
+Use `#define private public` / `#define protected public` to access all class members in tests:
+
+```cpp
+#include <gtest/gtest.h>
+#include <string>       // ALL system/STL headers BEFORE the #define block
+
+#define private public
+#define protected public
+#include "MyClass.h"    // project headers AFTER the #define
+#undef private
+#undef protected
+```
+
+**Rules:**
+- ALL system/STL/third-party headers (`<string>`, `<vector>`, `<gtest/gtest.h>`, etc.) MUST
+  come **before** `#define private public` — otherwise STL internals break
+- `#undef` after project includes restores normal semantics for the rest of the file
+- More portable than `-fno-access-control` — works with both GCC and Clang
+- `-fno-access-control` remains valid as an alternative via `COVERAGE_COMPILE_OPTIONS`
+
+This pattern enables:
+- Direct member field access (`obj.field_`) without getters
+- Calling private/protected methods directly
+- Testing internal state that would otherwise require complex public-API workarounds
+
+---
+
+## Header Resolution Principle
+
+If the project's main build succeeds, every `#include` in the source tree resolves to a real
+file. When an agent cannot find a header:
+
+1. Do NOT mark the file as [BuildFail] due to a missing header
+2. Search under the `project` path from UT_RULES.md
+3. Use: `find <project> -name "HeaderName.h" -type f`
+4. If multiple matches, check the source file's include context to pick the right one
+5. Add the header's directory to `target_include_directories` in CMakeLists.txt
 
 ---
 
@@ -383,7 +451,6 @@ TODO.md is organized as directory sections. Entry formats:
 - `- [ ] Bar.cc (0%, 617 uncov - needs tests)` — below 90%, has uncovered line count
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` — no instrumented lines captured yet
 - `- [ ] Qux.cc (0%, 49 uncov — **[NoCode]** pure enum definitions)` — classified, excluded
-- `- [ ] Dep.hh (0%, 84 uncov — **[DeclOnly]** no inline method bodies)` — classified, excluded
 - `- [ ] Big.cc (29%, 512 uncov — **[MaxCov 29%]** reason)` — at coverage ceiling, excluded
 
 The uncovered line count is the primary input for **complex-first** scoring.

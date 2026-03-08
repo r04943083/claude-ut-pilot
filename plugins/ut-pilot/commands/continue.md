@@ -12,7 +12,7 @@ Do not loop. Do not start the next batch automatically.
 Read `UT_RULES.md` from the test_root (search: project root, `tests/ut/`, `test/ut/`,
 `tests/`, `test/`). Parse the `## Configuration` section:
 
-- `source_root`, `test_root`, `framework`, `naming_convention`
+- `source_root`, `test_root`, `project`, `framework`, `naming_convention`
 - `parallel_agents` (default: 5)
 - `files_per_batch` (default: 10)
 - `strategy` (default: complex-first)
@@ -44,7 +44,6 @@ Apply `current_focus` filter if set.
 Exclude files matching ANY of the following in `UT_RULES.md`:
 - Recorded as `[BuildFail]` in `## Project Gotchas`
 - Recorded as `[NoCode]` in `## Project Gotchas`
-- Recorded as `[DeclOnly]` in `## Project Gotchas`
 - Listed in `## Max Coverage Files` (already at documented coverage ceiling)
 
 Do NOT exclude any other files — every remaining file must be attempted.
@@ -83,6 +82,7 @@ Each agent receives only paths and instructions — the agent reads files itself
 Assigned files: [list of source file paths]
 Test root: <test_root>
 Source root: <source_root>
+Project root: <project>
 UT_RULES.md path: <path to UT_RULES.md>
 Test directory (for CMake patterns): <test_root>/<module>/
 
@@ -93,18 +93,23 @@ Your task:
    CMakeLists.txt). If available, ALWAYS use it instead of manual include/lib specifications.**
 3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for
    existing fixture patterns)
-4. Classify each file (NoCode / DeclOnly / BuildFail / testable) — see SKILL.md
-5. Write tests targeting >90% line coverage per file
+4. Classify each file (NoCode / BuildFail / testable) — see SKILL.md.
+   DeclOnly headers are testable — write instantiation tests for them.
+5. Use the `#define private public` pattern for ALL test files (see SKILL.md Private Access Pattern)
+6. Write tests targeting >90% line coverage per file
    - For files with system-context dependencies: search other _ut.cc files in the same
      module directory for existing fixtures/wrappers and reuse them
    - For files that cannot be recompiled from source: use the prebuilt library strategy
-6. Update CMakeLists.txt using the **simplest available pattern**:
+7. Update CMakeLists.txt using the **simplest available pattern**:
    PREFERRED: `ut_add_simple_test` if aggregator is available.
    FALLBACK: `ut_add_test` or manual.
    **If the build system is verbose (same includes/libs repeated >3 targets) and no
    aggregator exists, note in UT_RULES.md `## Project Gotchas`:
    `[CMakeVerbose] <directory> — consider aggregator target`.**
-7. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
+8. When #include cannot be resolved under source_root, search under project root.
+   If any #include cannot be found, DO NOT mark as [BuildFail].
+   The project compiles, so the header exists. Search: find <project> -name "Header.h"
+9. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
    Do NOT add entries to ## Max Coverage Files unless a file genuinely cannot exceed the
    documented ceiling after exhausting all strategies.
 Report: files created/modified and expected coverage level.

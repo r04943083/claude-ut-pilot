@@ -13,6 +13,7 @@ Scan the project silently (no output yet). Detect:
 1. **Build system**: Look for `CMakeLists.txt` (CMake), `Makefile` (Make), `BUILD`/`BUILD.bazel` (Bazel), `meson.build` (Meson)
 2. **Existing test framework**: grep for `gtest`, `catch2`, `doctest`, `boost_test` in CMakeLists or source files
 3. **Source root**: Check for `src/`, `source/`, `lib/` directories; if `$ARGUMENTS` is provided, use it directly
+3b. **Project root**: Detect from `git rev-parse --show-toplevel`, or parent of source_root
 4. **Test root**: Check for `tests/ut/`, `test/ut/`, `tests/`, `test/`, `ut/`
 5. **Naming convention**: Look at existing test files — do they use `_test.cc`, `_ut.cc`, `_test.cpp`?
 6. **Coverage tooling**: Look for `.lcovrc`, `coverage.sh`, `lcov`, `gcovr`
@@ -32,6 +33,7 @@ Auto-detected configuration:
 | Setting           | Detected Value          | Notes                          |
 |-------------------|------------------------|--------------------------------|
 | source_root       | /path/to/src           | (from $ARGUMENTS or auto-scan) |
+| project           | /path/to/project       | (git root or parent of source_root) |
 | test_root         | /path/to/tests/ut      | (default, or existing test dir)|
 | module            | ModuleName             | from CMake project()           |
 | build_system      | cmake                  | CMakeLists.txt found           |
@@ -72,6 +74,7 @@ Write `UT_RULES.md` to the test_root directory (or project root if test_root doe
 
 ## Configuration
 - source_root: <resolved_absolute_path>
+- project: <resolved_project_root>
 - test_root: <resolved_absolute_path>
 - module: <ModuleName>
 - framework: gtest
@@ -101,7 +104,6 @@ src/<module>/subdir/  ->  tests/ut/<module>/subdir/
 Entry formats:
   - [BuildFail] FileName.cc — compilation/link error after 3 fix attempts
   - [NoCode] FileName.cc — no executable code to instrument
-  - [DeclOnly] FileName.hh — declaration-only header; no inline bodies
   - Free-form gotcha notes for patterns, fixtures, and workarounds)
 
 ## Max Coverage Files
@@ -377,9 +379,9 @@ UT_RULES_FILE="${SCRIPT_DIR}/UT_RULES.md"
 # Parse UT_RULES.md for status labels ([BuildFail], [NoCode], [DeclOnly], [MaxCov])
 declare -A FILE_STATUS_LABEL  # basename -> annotation string
 if [ -f "$UT_RULES_FILE" ]; then
-  # Scan entire file for [BuildFail], [NoCode], [DeclOnly] single-line gotcha entries
+  # Scan entire file for [BuildFail], [NoCode] single-line gotcha entries
   while IFS= read -r line; do
-    if [[ "$line" =~ ^-[[:space:]]\[(BuildFail|NoCode|DeclOnly)\][[:space:]]([[:alnum:]_.]+)[[:space:]]— ]]; then
+    if [[ "$line" =~ ^-[[:space:]]\[(BuildFail|NoCode)\][[:space:]]([[:alnum:]_.]+)[[:space:]]— ]]; then
       tag="${BASH_REMATCH[1]}"
       fname="${BASH_REMATCH[2]}"
       reason=$(echo "$line" | sed 's/.*— //')

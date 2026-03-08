@@ -30,7 +30,6 @@ Count: covered (≥90%), needs tests `- [ ]`.
 Also read `UT_RULES.md ## Project Gotchas` and count entries by tag:
 - `[BuildFail]` — compilation/link failure
 - `[NoCode]` — no executable code
-- `[DeclOnly]` — declaration-only header
 Read `UT_RULES.md ## Max Coverage Files` and count `[MaxCov]` entries.
 Group "Needs Tests" files by their section header (directory).
 
@@ -60,7 +59,6 @@ Run /ut-pilot:path with no args to return to global mode.
 | Need tests           | Y         |
 | [BuildFail]          | W         |
 | [NoCode]             | V         |
-| [DeclOnly]           | U         |
 | [MaxCov]             | T         |
 ```
 
@@ -101,7 +99,6 @@ All <N> source files are covered or documented as excluded in UT_RULES.md.
 - At >90% coverage:  X files
 - [BuildFail]:       W files  (see UT_RULES.md ## Project Gotchas)
 - [NoCode]:          V files  (see UT_RULES.md ## Project Gotchas)
-- [DeclOnly]:        U files  (see UT_RULES.md ## Project Gotchas)
 - [MaxCov]:          T files  (see UT_RULES.md ## Max Coverage Files)
 
 Run /ut-pilot:status again after any source changes to check for regressions.

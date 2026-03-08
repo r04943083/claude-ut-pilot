@@ -36,7 +36,6 @@ Read `TODO.md`. Format: directory sections with bullet entries:
 Collect all `- [ ]` entries. Exclude files matching ANY of the following in `UT_RULES.md`:
 - Recorded as `[BuildFail]` in `## Project Gotchas`
 - Recorded as `[NoCode]` in `## Project Gotchas`
-- Recorded as `[DeclOnly]` in `## Project Gotchas`
 - Listed in `## Max Coverage Files` (already at documented coverage ceiling)
 
 Do NOT exclude any other files — every remaining file must be attempted.
@@ -66,6 +65,7 @@ Each agent receives only paths and instructions — the agent reads files itself
 Assigned files: [list of source file paths]
 Test root: <test_root>
 Source root: <source_root>
+Project root: <project>
 UT_RULES.md path: <path to UT_RULES.md>
 Test directory (for CMake patterns): <test_root>/<module>/
 
@@ -76,18 +76,23 @@ Your task:
    CMakeLists.txt). If available, ALWAYS use it instead of manual include/lib specifications.**
 3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for
    existing fixture patterns)
-4. Classify each file (NoCode / DeclOnly / BuildFail / testable) — see SKILL.md
-5. Write tests targeting >90% line coverage per file
+4. Classify each file (NoCode / BuildFail / testable) — see SKILL.md.
+   DeclOnly headers are testable — write instantiation tests for them.
+5. Use the `#define private public` pattern for ALL test files (see SKILL.md Private Access Pattern)
+6. Write tests targeting >90% line coverage per file
    - For files with system-context dependencies: search other _ut.cc files in the same
      module directory for existing fixtures/wrappers and reuse them
    - For files that cannot be recompiled from source: use the prebuilt library strategy
-6. Update CMakeLists.txt using the **simplest available pattern**:
+7. Update CMakeLists.txt using the **simplest available pattern**:
    PREFERRED: `ut_add_simple_test` if aggregator is available.
    FALLBACK: `ut_add_test` or manual.
    **If the build system is verbose (same includes/libs repeated >3 targets) and no
    aggregator exists, note in UT_RULES.md `## Project Gotchas`:
    `[CMakeVerbose] <directory> — consider aggregator target`.**
-7. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
+8. When #include cannot be resolved under source_root, search under project root.
+   If any #include cannot be found, DO NOT mark as [BuildFail].
+   The project compiles, so the header exists. Search: find <project> -name "Header.h"
+9. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
    Do NOT add entries to ## Max Coverage Files unless a file genuinely cannot exceed the
    documented ceiling after exhausting all strategies.
 Report: files created/modified and expected coverage level.
@@ -136,7 +141,6 @@ Save any new gotchas discovered this batch to `UT_RULES.md ## Project Gotchas`.
 When recording classifications:
 - `[BuildFail] FileName.cc — <error>` — compilation/link failed after 3 fix attempts
 - `[NoCode] FileName.cc — <reason>` — no executable code to instrument
-- `[DeclOnly] FileName.hh — declaration-only header` — no inline bodies to instrument
 - Files at coverage ceiling → add to `## Max Coverage Files` as `**[MaxCov] FileName.cc (X%, Y uncov)**: reason. Maximum achievable: X%.`
 
 **G. No pause — go to next iteration immediately.**
@@ -147,7 +151,7 @@ When recording classifications:
 
 | Condition | Exit Message |
 |-----------|-------------|
-| All `- [ ]` entries gone (files reached ≥90%, or excluded as [BuildFail]/[NoCode]/[DeclOnly] in UT_RULES.md ## Project Gotchas, or listed in ## Max Coverage Files) | "All Done" report |
+| All `- [ ]` entries gone (files reached ≥90%, or excluded as [BuildFail]/[NoCode] in UT_RULES.md ## Project Gotchas, or listed in ## Max Coverage Files) | "All Done" report |
 
 ## Exit Report
 
@@ -163,7 +167,6 @@ Final coverage:
 - At >90%: X files
 - [BuildFail] (see UT_RULES.md ## Project Gotchas): W files
 - [NoCode] (see UT_RULES.md ## Project Gotchas): V files
-- [DeclOnly] (see UT_RULES.md ## Project Gotchas): U files
 - [MaxCov] (see UT_RULES.md ## Max Coverage Files): T files
 
 Run /ut-pilot:status for a full breakdown.

@@ -36,8 +36,8 @@ Auto-detected configuration:
 | framework         | gtest                  | (default or detected)          |
 | coverage_tool     | lcov                   | lcov found on system           |
 | naming_convention | {FileName}_ut.cc       | (default, or from existing tests) |
-| parallel_agents   | 3                      | concurrent agents per batch    |
-| files_per_batch   | 5                      | files processed per batch      |
+| parallel_agents   | 5                      | concurrent agents per batch    |
+| files_per_batch   | 10                     | files processed per batch      |
 | strategy          | complex-first          | complex-first / medium-first / simple-first |
 ```
 
@@ -45,8 +45,8 @@ Then use **one** `AskUserQuestion` call to ask these 4 key settings:
 
 1. **source_root** — `<detected_path> (Recommended)`, plus any other candidate directories found (e.g., `source/`, `lib/`). Header: "Source root"
 2. **test_root** — `<detected_path> (Recommended)`, plus alternatives like `tests/`, `test/ut/`, `test/`. Header: "Test root"
-3. **parallel_agents** — `3 (Recommended)`, `1`, `5`. Header: "Agents"
-4. **files_per_batch** — `5 (Recommended)`, `3`, `10`. Header: "Batch size"
+3. **parallel_agents** — `5 (Recommended)`, `1`, `3`. Header: "Agents"
+4. **files_per_batch** — `10 (Recommended)`, `5`, `15`. Header: "Batch size"
 
 **Wait for user response.** Apply any changes to the detected values.
 
@@ -73,19 +73,23 @@ Write `UT_RULES.md` to the test_root directory (or project root if test_root doe
 - coverage_tool: lcov
 - naming_convention: {FileName}_ut.cc
 - build_system: cmake
-- parallel_agents: 3
-- files_per_batch: 5
+- parallel_agents: 5
+- files_per_batch: 10
 - strategy: complex-first
 - current_focus: ""
 
-## Test Conventions
-(Populated after first continue run based on project patterns discovered)
+## CMake Patterns
+(Populated after first continue run — reference for the specific project's cmake macros)
 
 ## Project Gotchas
 (Populated by agents as issues are encountered during test writing)
+
+## Max Coverage Files
+Files documented at their maximum achievable coverage without full system init:
+(Agents add entries here when a file cannot reach >90% due to system dependencies)
 ```
 
-If `UT_RULES.md` already exists, preserve any existing `## Test Conventions` and `## Project Gotchas` sections; only update `## Configuration`.
+If `UT_RULES.md` already exists, preserve any existing `## CMake Patterns`, `## Project Gotchas`, and `## Max Coverage Files` sections; only update `## Configuration`.
 
 ### 3b. Create Infrastructure Files (only if they don't exist)
 
@@ -160,7 +164,10 @@ ctest --output-on-failure
 mkdir -p "$REPORT_DIR"
 lcov --capture --directory . --output-file coverage.info --rc lcov_branch_coverage=1
 lcov --remove coverage.info '/usr/*' '*/gtest/*' '*/gmock/*' --output-file coverage_filtered.info
-genhtml coverage_filtered.info --output-directory "$REPORT_DIR" --branch-coverage
+
+# Use realpath so --prefix strips correctly even if SOURCE_ROOT contains symlinks
+SOURCE_ROOT_REAL=$(realpath "$SOURCE_ROOT")
+genhtml coverage_filtered.info --output-directory "$REPORT_DIR" --branch-coverage --prefix "$SOURCE_ROOT_REAL"
 
 # Generate TODO.md
 python3 "$SCRIPT_DIR/gen_todo.py" coverage_filtered.info "$SCRIPT_DIR/TODO.md" || \
@@ -172,8 +179,10 @@ echo "Coverage report: $REPORT_DIR/index.html"
 **`gen_todo.py`** in test_root (generates TODO.md from lcov info):
 ```python
 #!/usr/bin/env python3
-"""Parse lcov .info file and generate TODO.md listing files needing tests."""
-import sys, re, os
+"""Parse lcov .info file and generate TODO.md in directory-organized bullet list format."""
+import sys, os
+from datetime import datetime
+from collections import defaultdict
 
 def parse_lcov(info_file):
     files = {}
@@ -192,36 +201,47 @@ def parse_lcov(info_file):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: gen_todo.py coverage.info TODO.md")
+        print("Usage: gen_todo.py coverage.info TODO.md [source_root]")
         sys.exit(1)
     info_file, todo_file = sys.argv[1], sys.argv[2]
+    source_root = sys.argv[3].rstrip('/') if len(sys.argv) > 3 else ''
+
     files = parse_lcov(info_file)
 
-    needs_tests = []
-    covered = []
-    for path, data in sorted(files.items()):
-        found = data['lines_found']
-        hit = data['lines_hit']
-        if found == 0:
-            continue
-        pct = hit / found * 100
-        if pct < 90:
-            needs_tests.append((path, pct, found - hit))
-        else:
-            covered.append((path, pct))
+    # Strip source_root prefix to get relative paths
+    rel_files = {}
+    for path, data in files.items():
+        rel = path[len(source_root)+1:] if source_root and path.startswith(source_root + '/') else path
+        rel_files[rel] = data
 
+    # Group by directory
+    by_dir = defaultdict(list)
+    for rel_path, data in sorted(rel_files.items()):
+        d = os.path.dirname(rel_path)
+        by_dir[d].append((os.path.basename(rel_path), rel_path, data))
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(todo_file, 'w') as f:
-        f.write("# TODO: Files Needing Tests\n\n")
-        f.write(f"Generated from coverage data. {len(covered)} files at >90%, {len(needs_tests)} need work.\n\n")
-        f.write("## Needs Tests\n\n")
-        f.write("| File | Coverage | Uncovered Lines |\n")
-        f.write("|------|----------|------------------|\n")
-        for path, pct, uncov in sorted(needs_tests, key=lambda x: -x[2]):
-            f.write(f"| {path} | {pct:.1f}% | {uncov} |\n")
-        f.write("\n## Covered (>90%)\n\n")
-        for path, pct in covered:
-            f.write(f"- {path} ({pct:.1f}%)\n")
-    print(f"TODO.md written: {len(needs_tests)} files need tests")
+        f.write(f"# Unit Test Coverage TODO\n\nAuto-generated on {now}\n\n")
+        for d in sorted(by_dir.keys()):
+            depth = d.count('/') + 2 if d else 1
+            heading = '#' * depth
+            label = d if d else '(root)'
+            f.write(f"{heading} {label}\n\n")
+            for fname, rel_path, data in sorted(by_dir[d]):
+                found = data['lines_found']
+                hit = data['lines_hit']
+                if found == 0:
+                    f.write(f"- [ ] {fname} (0%, ? uncov - no tests)\n")
+                else:
+                    pct = int(hit / found * 100)
+                    uncov = found - hit
+                    if pct >= 90:
+                        f.write(f"- [x] {fname} ({pct}% - covered)\n")
+                    else:
+                        f.write(f"- [ ] {fname} ({pct}%, {uncov} uncov - needs tests)\n")
+            f.write("\n")
+    print(f"TODO.md written: {len(rel_files)} files")
 
 if __name__ == '__main__':
     main()

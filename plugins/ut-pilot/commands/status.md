@@ -21,9 +21,15 @@ Check if `TODO.md` exists in `test_root`:
 - If it exists: read it directly
 - If it doesn't exist: run `cd <test_root> && bash coverage.sh` to generate it, then read
 
-Parse `TODO.md`:
-- Count total files, covered (>90%), needs tests, skipped, build failures
-- Group "Needs Tests" files by subdirectory
+Also read `## Max Coverage Files` section from `UT_RULES.md` → build `maxcov_files` set.
+
+Parse `TODO.md`. Format: directory sections with bullet entries:
+- `- [x] Foo.cc (94% - covered)` → covered
+- `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → needs tests (includes uncovered line count)
+- `- [ ] Baz.cc (0%, ? uncov - no tests)` → needs tests
+
+Count: covered (≥90%), needs tests `- [ ]`, maxcov documented (cross-ref UT_RULES.md), build failures.
+Group "Needs Tests" files by their section header (directory).
 
 ## Step 3: Print Status Report
 
@@ -49,7 +55,7 @@ Run /ut-pilot:path with no args to return to global mode.
 | Total source files | N |
 | At >90% coverage | X (XX%) |
 | Need tests | Y |
-| Marked [Skip] | Z |
+| MaxCov documented | Z |
 | Marked [BuildFail] | W |
 ```
 
@@ -86,6 +92,10 @@ Run /ut-pilot:path <dir> to focus on a specific directory first.
 ### If All Done
 
 ```
-All <N> source files are at >90% coverage (or classified as Skip/BuildFail).
+All <N> source files are at >90% coverage (or documented in MaxCov / marked BuildFail).
+- At >90%: X files
+- MaxCov documented: Y files
+- [BuildFail]: W files
+
 Run /ut-pilot:status again after any source changes to check for regressions.
 ```

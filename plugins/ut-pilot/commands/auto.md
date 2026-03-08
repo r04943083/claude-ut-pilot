@@ -11,11 +11,11 @@ description: "Automatically loop continue until all files reach >90% coverage"
 Read `UT_RULES.md`. If not found, stop: "UT_RULES.md not found. Run /ut-pilot:init first."
 
 Parse: `parallel_agents`, `files_per_batch`, `strategy`, `current_focus`.
+Read `## Max Coverage Files` section → build `maxcov_files` set (all file paths listed there).
 
 Initialize loop state:
-- `consecutive_no_progress` = 0
-- `total_files_processed` = 0
 - `batch_number` = 0
+- `total_files_processed` = 0
 
 ## The Loop
 
@@ -27,36 +27,53 @@ Repeat the following until a stop condition is met. **Do NOT ask for user confir
 
 **A. Load TODO.md**
 
-Read `TODO.md`. Identify all files with status "Needs Tests" and not marked `[Skip]` or `[BuildFail]`.
+Read `TODO.md`. Format: directory sections with bullet entries:
+- `- [x] Foo.cc (94% - covered)` → skip (≥90%)
+- `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable
+- `- [ ] Baz.cc (0%, ? uncov - no tests)` → actionable
+
+Collect all `- [ ]` entries. Exclude: files in `maxcov_files` set, files marked `[BuildFail]`.
 
 Apply `current_focus` filter if set.
 
 **Terminal check — exit if**:
-- Zero files remain (all covered or all skipped) → Exit: All Done
-- All remaining are `[Skip]` or `[BuildFail]` → Exit: Nothing More to Do
+- Remaining (not excluded) == 0 → Exit: All Done
 
 **B. Score and Select Batch**
 
-Same scoring logic as continue.md:
-
-**complex-first**: Score each file. Higher = process first.
+Apply **complex-first** scoring to rank remaining files (higher = process first):
 - Has `.cc`: +2
 - `.cc` >100 lines: +1
 - Uncovered lines above median: +1
-- Many internal includes: +1 per 3 (max +2)
-- Deep system dependency (PlacerDB-level): mark `[Skip]`, exclude
+- Many internal includes: +1 per 3 includes (max +2)
 
-Select top `files_per_batch` files.
+Select top `files_per_batch` files. **Do NOT auto-mark any file as [Skip].**
 
 **C. Assign and Spawn Agents**
 
-Divide files across `parallel_agents` agents (1-2 files each).
+Divide files evenly across `parallel_agents` agents. Spawn agents in parallel using the Agent tool.
 
-Spawn agents in parallel using the same agent prompt as continue.md:
-- Source file content (.h + .cc)
-- Relevant CMakeLists.txt patterns
-- UT_RULES.md Configuration + Gotchas
-- Write Test Workflow from ut-pilot SKILL.md
+Each agent receives only paths and instructions — the agent reads files itself:
+
+```
+Assigned files: [list of source file paths]
+Test root: <test_root>
+Source root: <source_root>
+UT_RULES.md path: <path to UT_RULES.md>
+Test directory (for CMake patterns): <test_root>/<module>/
+
+Your task:
+1. Read assigned source files (use LSP document_symbols first if >200 lines)
+2. Check existing CMakeLists.txt in the test directory for cmake patterns
+3. Read UT_RULES.md for gotchas and conventions
+4. Write tests targeting >90% line coverage per file
+5. Update CMakeLists.txt
+6. If you cannot reach >90% due to system dependencies, write what IS testable,
+   then add an entry to UT_RULES.md '## Max Coverage Files' with reason:
+   `- FileName.cc (MaxCov: X%) — reason`
+7. If you discover a gotcha, append it to UT_RULES.md '## Project Gotchas'.
+Report: files created/modified and expected coverage level.
+```
 
 Wait for all agents to complete.
 
@@ -66,7 +83,7 @@ Wait for all agents to complete.
 cd <test_root> && bash run_tests.sh
 ```
 
-If build fails: fix (up to 3 attempts). If still failing, mark affected files `[BuildFail]` in TODO.md.
+If build fails: fix (up to 3 attempts). If still failing after 3 attempts, mark affected files `[BuildFail]` in TODO.md.
 
 ```bash
 cd <test_root> && bash coverage.sh
@@ -74,31 +91,27 @@ cd <test_root> && bash coverage.sh
 
 This regenerates TODO.md. Count how many files newly crossed 90%.
 
-**E. Batch Progress Report** (print after each batch, then continue immediately)
+**E. Update maxcov_files**
+
+Re-read `UT_RULES.md` `## Max Coverage Files` section. Any newly added entries = progress for this batch.
+
+**F. Progress Report**
 
 ```
 --- Batch <N> complete ---
 Processed: <list of files>
 Newly at >90%: X files
-Still below 90%: Y files in this batch
-Overall: <total covered> / <total> files at >90%
+Newly documented MaxCov: Y files
+Overall: <covered + maxcov> / <total> files resolved
 Remaining: <Z> files need tests
 --------------------------
 ```
-
-**F. Check Progress**
-
-If newly-at-90% count for this batch = 0:
-- Increment `consecutive_no_progress`
-- If `consecutive_no_progress` >= 3: exit → Stuck
-
-If any progress: reset `consecutive_no_progress` = 0
 
 Increment `batch_number`, add to `total_files_processed`.
 
 **G. Persist Gotchas**
 
-Append any new gotchas discovered this batch to UT_RULES.md.
+Ensure any new gotchas discovered this batch are saved to UT_RULES.md.
 
 **H. No pause — go to next iteration immediately.**
 
@@ -108,48 +121,22 @@ Append any new gotchas discovered this batch to UT_RULES.md.
 
 | Condition | Exit Message |
 |-----------|-------------|
-| All files ≥90% coverage | "All done" report (see below) |
-| All remaining files are [Skip] or [BuildFail] | "Nothing more to process automatically" report |
-| 3 consecutive batches with 0 new files reaching 90% | "Stuck" report |
+| All files ≥90% or in MaxCov set or [BuildFail] | "All Done" report |
 
-## Exit Reports
+## Exit Report
 
 ### All Done
+
 ```
-## Auto Complete — All Files Covered
+## Auto Complete
 
 Processed <N> batches, <M> total files.
-All files now at >90% coverage (or classified Skip/BuildFail).
+All files are now either at >90% coverage or documented in Max Coverage Files.
 
-Final coverage: <X>/<Y> source files at >90%
-Skipped (deep deps): <Z> files
-Build failures: <W> files
+Final coverage:
+- At >90%: X files
+- MaxCov documented: Y files
+- [BuildFail]: W files
 
 Run /ut-pilot:status for a full breakdown.
-```
-
-### Nothing More to Process
-```
-## Auto Stopped — No Actionable Files Remain
-
-<X>/<Y> files at >90%
-<Z> files marked [Skip] (deep dependencies, require full system context)
-<W> files marked [BuildFail] (build infrastructure not yet ready)
-
-To handle skipped files: set up mocking infrastructure, then run /ut-pilot:continue manually.
-```
-
-### Stuck (no progress for 3 batches)
-```
-## Auto Stopped — No Progress for 3 Consecutive Batches
-
-Last files attempted:
-- <list>
-
-Possible causes:
-- Build errors that need manual investigation
-- Test files exist but coverage tool not measuring them
-- Files require mocking infrastructure not yet in place
-
-Check the build output above. Fix the blocking issue, then resume with /ut-pilot:continue.
 ```

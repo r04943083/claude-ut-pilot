@@ -60,7 +60,7 @@ Count:
 - Total source files in directory
 - Already covered (>90%)
 - Needs tests
-- Marked Skip
+- MaxCov documented (in UT_RULES.md ## Max Coverage Files)
 - No test file at all (0%)
 
 Apply the configured `strategy` scoring to order the "Needs Tests" files — show the top 10.
@@ -75,7 +75,7 @@ Directory status:
 - Total source files: N
 - Already at >90% coverage: X
 - Need tests: Y
-- Marked Skip: Z
+- MaxCov documented: Z
 
 Next targets (complex-first):
 1. path/to/File1.cc — 0%, ~180 lines

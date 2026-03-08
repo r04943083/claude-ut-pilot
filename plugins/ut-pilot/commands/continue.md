@@ -11,18 +11,24 @@ description: "Auto-pick next uncovered files and write tests to increase coverag
 Read `UT_RULES.md` from the test_root (search: project root, `tests/ut/`, `test/ut/`, `tests/`, `test/`). Parse the `## Configuration` section:
 
 - `source_root`, `test_root`, `framework`, `naming_convention`
-- `parallel_agents` (default: 3)
-- `files_per_batch` (default: 5)
+- `parallel_agents` (default: 5)
+- `files_per_batch` (default: 10)
 - `strategy` (default: complex-first)
 - `current_focus` (empty = global mode; non-empty = restrict to that directory)
 
-Also read `## Project Gotchas` — pass these to each agent to avoid known pitfalls.
+Also read `## Max Coverage Files` → build `maxcov_files` set.
+Also read `## Project Gotchas` — pass the path to agents so they can avoid known pitfalls.
 
 If `UT_RULES.md` is not found, stop and say: "UT_RULES.md not found. Run /ut-pilot:init first."
 
 ## Step 2: Load TODO.md
 
-Read `TODO.md` from test_root. Parse the `## Needs Tests` table for uncovered files.
+Read `TODO.md` from test_root. It is organized as directory sections (e.g. `## module/buffer`) with bullet entries:
+- `- [x] Foo.cc (94% - covered)` → at ≥90%, skip
+- `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable (coverage, uncovered line count)
+- `- [ ] Baz.cc (0%, ? uncov - no tests)` → no coverage data yet
+
+Collect all `- [ ]` entries as the uncovered file list.
 
 If `TODO.md` doesn't exist or is older than 1 hour, run:
 ```bash
@@ -32,7 +38,9 @@ Then re-read the generated `TODO.md`.
 
 Filter by `current_focus`: if non-empty, only consider files under that path.
 
-If no uncovered files remain (or all are marked Skip), report completion and stop.
+Exclude files in `maxcov_files` set and files marked `[BuildFail]`.
+
+If no actionable files remain, report completion and stop.
 
 ## Step 3: Score and Select Files
 
@@ -43,7 +51,6 @@ Apply the **complex-first** scoring (or the configured strategy) to rank uncover
 - `.cc` file has >100 lines: **+1**
 - Uncovered lines count (from TODO.md) is above median: **+1**
 - Number of project-internal `#include`s in the header (non-system headers): **+1 per 3 includes, max +2**
-- Depends on known-problematic classes (PlacerDB, full system context): **mark Skip, score = -99**
 
 ### medium-first scoring:
 - Has `.cc`: **+1**
@@ -55,33 +62,32 @@ Apply the **complex-first** scoring (or the configured strategy) to rank uncover
 - Few includes: **+2**
 - Many includes or complex deps: penalty
 
-Select top `files_per_batch` files (excluding any already marked Skip).
-
-If a file should be marked Skip (deep dependency, no test infrastructure support), add `[Skip]` annotation to its row in `TODO.md` and exclude it.
+Select top `files_per_batch` files. **Do NOT auto-mark any file as [Skip].**
 
 ## Step 4: Assign Files to Agents
 
-Divide the selected files evenly across `parallel_agents` agents (round-robin). Each agent gets 1-2 files.
+Divide the selected files evenly across `parallel_agents` agents (round-robin).
 
-Build the agent prompt for each agent. Include:
-1. The source files' full content (`.h` + `.cc`) for its assigned files
-2. The relevant CMakeLists.txt section from the test directory (existing patterns)
-3. `UT_RULES.md` — `## Configuration` + `## Test Conventions` + `## Project Gotchas` sections
-4. The Write Test Workflow from the ut-pilot SKILL.md
+Each agent receives only paths and instructions — the agent reads files itself:
 
-Agent task instruction:
 ```
-You are a unit test writer. Your task:
-1. Read the provided source file(s)
-2. Write comprehensive test file(s) targeting >90% line coverage
-3. Update CMakeLists.txt to build and register the new test(s)
-4. Follow the naming convention: {FileName}_ut.cc (or as specified in UT_RULES.md)
-5. Mirror the source directory structure under test_root
-6. If you discover a gotcha (build failure pattern, include ordering issue, etc.),
-   append it to the ## Project Gotchas section of UT_RULES.md
+Assigned files: [list of source file paths]
+Test root: <test_root>
+Source root: <source_root>
+UT_RULES.md path: <path to UT_RULES.md>
+Test directory (for CMake patterns): <test_root>/<module>/
 
-Do NOT run builds. The main process handles verification.
-Report: list of files you created/modified.
+Your task:
+1. Read assigned source files (use LSP document_symbols first if >200 lines)
+2. Check existing CMakeLists.txt in the test directory for cmake patterns
+3. Read UT_RULES.md for gotchas and conventions
+4. Write tests targeting >90% line coverage per file
+5. Update CMakeLists.txt
+6. If you cannot reach >90% due to system dependencies, write what IS testable,
+   then add an entry to UT_RULES.md '## Max Coverage Files' with reason:
+   `- FileName.cc (MaxCov: X%) — reason`
+7. If you discover a gotcha, append it to UT_RULES.md '## Project Gotchas'.
+Report: files created/modified and expected coverage level.
 ```
 
 ## Step 5: Execute Agents
@@ -89,7 +95,7 @@ Report: list of files you created/modified.
 If `parallel_agents` > 1: spawn N Agent calls in parallel (use the Agent tool).
 If `parallel_agents` = 1: execute sequentially.
 
-Wait for ALL agents to complete before proceeding. Do not do other work while waiting.
+Wait for ALL agents to complete before proceeding.
 
 ## Step 6: Verification Loop (main process)
 
@@ -115,15 +121,15 @@ This regenerates `TODO.md` with updated percentages.
 
 ### 6c. Check New File Coverage
 
-For each file processed this batch: if new coverage <90%, read the coverage HTML report to identify uncovered lines, add targeted tests for uncovered branches. Rebuild and recheck (max 2 iterations).
+For each file processed this batch: if new coverage <90%, re-read `UT_RULES.md ## Max Coverage Files` to check if an agent added a MaxCov entry for it. If not, read the coverage HTML report to identify uncovered lines and add targeted tests for uncovered branches. Rebuild and recheck (max 2 iterations).
 
 ### 6d. Persist Gotchas
 
-If any agent reported new gotchas, ensure they are appended to `UT_RULES.md ## Project Gotchas`.
+Ensure any new gotchas reported by agents are saved to `UT_RULES.md ## Project Gotchas`.
 
 ## Step 7: Report and STOP
 
-Print a report, then STOP. Do not begin another batch. Do not call continue again.
+Print a report, then STOP. Do not begin another batch.
 
 ```
 ## Batch Complete
@@ -132,15 +138,16 @@ Print a report, then STOP. Do not begin another batch. Do not call continue agai
 |------|--------|-------|--------|
 | path/to/Foo.cc | 0% | 94% | NEW |
 | path/to/Bar.cc | 23% | 88% | IMPROVED (below 90%) |
+| path/to/Baz.cc | 0% | 0% | MaxCov: 0% — requires PlacerDB |
 
-**This batch**: processed N files, M newly at >90%
+**This batch**: processed N files, M newly at >90%, K documented MaxCov
 **Overall**: X/Y files at >90% coverage
 **Remaining**: Z files need tests
 
 ### Next Targets (complex-first)
-1. path/to/Next1.cc — 0%, 245 uncovered lines
-2. path/to/Next2.cc — 31%, 112 uncovered lines
-3. path/to/Next3.cc — 0%, 88 uncovered lines
+1. module/buffer/Next1.cc — 0%, 245 uncov
+2. module/placer/Next2.cc — 31%, 112 uncov
+3. utility/Next3.cc — 0%, 88 uncov
 
 Run /ut-pilot:continue for the next batch.
 ```

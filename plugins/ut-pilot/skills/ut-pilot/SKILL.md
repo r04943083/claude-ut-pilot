@@ -25,7 +25,15 @@ This file is referenced by agents spawned during parallel test writing.
 
 ### Step 1: Read and Understand the Source
 
-Read both the header (`.h`/`.hh`/`.hpp`) and implementation (`.cc`/`.cpp`) files. Identify:
+**For files >200 lines**: Use LSP before reading the full file:
+1. `document_symbols` on the `.hh`/`.cc` → get method list and signatures
+2. From method names, identify which are public and have non-trivial implementation
+3. Read only those sections (use offset+limit in the Read tool)
+4. Focus test writing on those methods; skip private/unreachable utility code
+
+This avoids reading thousands of lines to find 10 testable methods.
+
+For all files, identify:
 
 - **Class name and namespace**
 - **Constructors**: default, parameterized, copy, move
@@ -37,7 +45,7 @@ Read both the header (`.h`/`.hh`/`.hpp`) and implementation (`.cc`/`.cpp`) files
 - **Static/free functions** in `.cc` files (need tests too)
 
 If LSP is available:
-- Use `document symbols` to list all class methods without parsing headers manually
+- Use `document_symbols` to list all class methods without parsing headers manually
 - Use `go to definition` on forward-declared types to confirm their actual type before writing tests
 - Use `find references` to understand how a class is used across the project
 
@@ -183,24 +191,28 @@ For each file you wrote tests for: verify >90% line coverage. If below:
 
 ## Coverage Operations
 
-### Generate coverage report
+### TODO.md format (produced by gen_todo.sh)
+
+TODO.md is organized as directory sections. Entries:
+- `- [x] Foo.cc (94% - covered)` — at ≥90%, skip
+- `- [ ] Bar.cc (0%, 617 uncov - needs tests)` — below 90%, has uncovered line count
+- `- [ ] Baz.cc (0%, ? uncov - no tests)` — no instrumented lines captured yet
+
+The uncovered line count from TODO.md is the primary input for **complex-first** scoring.
+
+### Regenerate coverage + TODO.md
 ```bash
-cd <build_dir>
-cmake .. -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc)
-ctest --output-on-failure
-lcov --capture --directory . --output-file coverage.info
-lcov --remove coverage.info '/usr/*' '*/gtest/*' '*/gmock/*' --output-file coverage_filtered.info
-genhtml coverage_filtered.info --output-directory coverage_report/
+cd <test_root> && bash coverage.sh       # builds, tests, generates coverage_filtered.info + TODO.md
+cd <test_root> && bash gen_todo.sh       # re-parse existing coverage_filtered.info only (faster)
 ```
 
 ### Check a specific file's coverage
 ```bash
-lcov --list coverage_filtered.info | grep "FileName"
+lcov --list <test_root>/build_cov/coverage_filtered.info | grep "FileName"
 ```
 
 ### View uncovered lines
-Open `coverage_report/path/to/FileName.cc.gcov.html` in a browser, or:
+Open `<test_root>/coverage_report/<module_path>/FileName.cc.gcov.html` in a browser, or:
 ```bash
 gcov -b -c FileName.cc  # shows branch coverage in terminal
 ```
@@ -252,9 +264,12 @@ TEST(FileReaderTest, ReadsCorrectly) {
 
 ### Classes with deep system dependencies (DB / full context)
 If the constructor requires a database object that cannot be constructed in isolation:
-- Mark the file as `[Skip]` in `TODO.md`
-- Note in `UT_RULES.md ## Project Gotchas` what infrastructure would be needed
-- Do not waste time fighting the dependency chain
+- Write tests for any methods that ARE callable without the full system context
+- Add an entry to `UT_RULES.md ## Max Coverage Files` documenting the max achievable coverage and reason:
+  ```
+  - FileName.cc (MaxCov: X%) — constructor dereferences PlacerDB immediately
+  ```
+- Do not leave the file with zero attempt — test what you can, document what you cannot
 
 ---
 
@@ -267,7 +282,7 @@ Use this to classify files for strategy scoring:
 | **Easy** | Header-only (no `.cc`), or `.cc` <50 lines, few internal includes |
 | **Medium** | Has `.cc`, 50-150 lines, <5 internal includes, no system-level deps |
 | **Hard** | Has `.cc`, >150 lines, many internal includes, some system deps but mockable |
-| **Skip** | Requires database/full-system context in constructor, external services, or integration-level setup |
+| **System-Dependent** | Requires database/full-system context in constructor, external services, or integration-level setup — test what you can, document MaxCov |
 
 Complexity score for **complex-first**:
 - Has `.cc`: +2

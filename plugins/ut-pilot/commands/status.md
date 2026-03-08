@@ -27,7 +27,11 @@ Parse `TODO.md`. Format: directory sections with bullet entries:
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` → needs tests
 
 Count: covered (≥90%), needs tests `- [ ]`.
-Also read `UT_RULES.md ## Project Gotchas` and count lines starting with `[BuildFail]` for the build-failure count.
+Also read `UT_RULES.md ## Project Gotchas` and count entries by tag:
+- `[BuildFail]` — compilation/link failure
+- `[NoCode]` — no executable code
+- `[DeclOnly]` — declaration-only header
+Read `UT_RULES.md ## Max Coverage Files` and count `[MaxCov]` entries.
 Group "Needs Tests" files by their section header (directory).
 
 ## Step 3: Print Status Report
@@ -51,10 +55,13 @@ Run /ut-pilot:path with no args to return to global mode.
 ```
 | Metric | Count |
 |--------|-------|
-| Total source files | N |
-| At >90% coverage | X (XX%) |
-| Need tests | Y |
-| Marked [BuildFail] | W |
+| Total source files   | N         |
+| At >90% coverage     | X  (XX%)  |
+| Need tests           | Y         |
+| [BuildFail]          | W         |
+| [NoCode]             | V         |
+| [DeclOnly]           | U         |
+| [MaxCov]             | T         |
 ```
 
 ### By Directory
@@ -90,9 +97,12 @@ Run /ut-pilot:path <dir> to focus on a specific directory first.
 ### If All Done
 
 ```
-All <N> source files are at >90% coverage (or recorded as [BuildFail] in UT_RULES.md ## Project Gotchas).
-- At >90%: X files
-- [BuildFail] (see UT_RULES.md ## Project Gotchas): W files
+All <N> source files are covered or documented as excluded in UT_RULES.md.
+- At >90% coverage:  X files
+- [BuildFail]:       W files  (see UT_RULES.md ## Project Gotchas)
+- [NoCode]:          V files  (see UT_RULES.md ## Project Gotchas)
+- [DeclOnly]:        U files  (see UT_RULES.md ## Project Gotchas)
+- [MaxCov]:          T files  (see UT_RULES.md ## Max Coverage Files)
 
 Run /ut-pilot:status again after any source changes to check for regressions.
 ```

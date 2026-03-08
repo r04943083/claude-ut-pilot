@@ -4,11 +4,13 @@ description: "Auto-pick next uncovered files and write tests to increase coverag
 
 # /ut-pilot:continue — Single Batch Test Writing
 
-**Responsibility**: Process exactly ONE batch of files, then STOP and report. Do not loop. Do not start the next batch automatically.
+**Responsibility**: Process exactly ONE batch of files, then STOP and report.
+Do not loop. Do not start the next batch automatically.
 
 ## Step 1: Load Configuration
 
-Read `UT_RULES.md` from the test_root (search: project root, `tests/ut/`, `test/ut/`, `tests/`, `test/`). Parse the `## Configuration` section:
+Read `UT_RULES.md` from the test_root (search: project root, `tests/ut/`, `test/ut/`,
+`tests/`, `test/`). Parse the `## Configuration` section:
 
 - `source_root`, `test_root`, `framework`, `naming_convention`
 - `parallel_agents` (default: 5)
@@ -16,34 +18,36 @@ Read `UT_RULES.md` from the test_root (search: project root, `tests/ut/`, `test/
 - `strategy` (default: complex-first)
 - `current_focus` (empty = global mode; non-empty = restrict to that directory)
 
-Also read `## Project Gotchas` — pass the path to agents so they can avoid known pitfalls and find existing fixture patterns.
+Also read `## Project Gotchas` — pass the path to agents so they can avoid known pitfalls
+and find existing fixture patterns.
 
-If `UT_RULES.md` is not found, stop and say: "UT_RULES.md not found. Run /ut-pilot:init first."
+If `UT_RULES.md` is not found, stop and say:
+"UT_RULES.md not found. Run /ut-pilot:init first."
 
 ## Step 2: Load TODO.md
 
-Read `TODO.md` from test_root. It is organized as directory sections (e.g. `## module/buffer`) with bullet entries:
+Read `TODO.md` from test_root. Format: directory sections with bullet entries:
 - `- [x] Foo.cc (94% - covered)` → at ≥90%, skip
-- `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable (coverage, uncovered line count)
+- `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` → no coverage data yet
 
-Collect all `- [ ]` entries as the uncovered file list.
-
-If `TODO.md` doesn't exist or is older than 1 hour, run:
+If `TODO.md` does not exist or is older than 1 hour, run:
 ```bash
 cd <test_root> && bash coverage.sh
 ```
 Then re-read the generated `TODO.md`.
 
-Filter by `current_focus`: if non-empty, only consider files under that path.
+Collect all `- [ ]` entries as the uncovered file list.
 
-Exclude files that match ANY of the following in UT_RULES.md:
+Apply `current_focus` filter if set.
+
+Exclude files matching ANY of the following in `UT_RULES.md`:
 - Recorded as `[BuildFail]` in `## Project Gotchas`
 - Recorded as `[NoCode]` in `## Project Gotchas`
 - Recorded as `[DeclOnly]` in `## Project Gotchas`
-- Listed in `## Max Coverage Files` (已达到文档记录的覆盖率上限)
+- Listed in `## Max Coverage Files` (already at documented coverage ceiling)
 
-Do NOT exclude any other files — every file must be attempted.
+Do NOT exclude any other files — every remaining file must be attempted.
 
 If no actionable files remain, report completion and stop.
 
@@ -59,7 +63,7 @@ Apply the **complex-first** scoring (or the configured strategy) to rank uncover
 
 ### medium-first scoring:
 - Has `.cc`: **+1**
-- `.cc` lines 50-150: **+2**
+- `.cc` lines 50–150: **+2**
 - Few internal includes (<3): **+1**
 
 ### simple-first scoring:
@@ -85,13 +89,17 @@ Test directory (for CMake patterns): <test_root>/<module>/
 Your task:
 1. Read assigned source files (use LSP document_symbols first if >200 lines)
 2. Check existing CMakeLists.txt in the test directory for cmake patterns
-3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for existing fixture patterns)
-4. Write tests targeting >90% line coverage per file
-   - For files with system-context dependencies: search other _ut.cc files in the same module directory for existing fixtures/wrappers and reuse them
-   - The project is guaranteed to compile — there is always a way to write at least one passing test
-5. Update CMakeLists.txt
-6. Do NOT add entries to UT_RULES.md '## Max Coverage Files'. Every file can be tested.
-7. If you discover a gotcha or a useful fixture pattern, append it to UT_RULES.md '## Project Gotchas'.
+3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for
+   existing fixture patterns)
+4. Classify each file (NoCode / DeclOnly / BuildFail / testable) — see SKILL.md
+5. Write tests targeting >90% line coverage per file
+   - For files with system-context dependencies: search other _ut.cc files in the same
+     module directory for existing fixtures/wrappers and reuse them
+   - For files that cannot be recompiled from source: use the prebuilt library strategy
+6. Update CMakeLists.txt
+7. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
+   Do NOT add entries to ## Max Coverage Files unless a file genuinely cannot exceed the
+   documented ceiling after exhausting all strategies.
 Report: files created/modified and expected coverage level.
 ```
 
@@ -115,7 +123,10 @@ If build fails:
 - Diagnose the error (missing include, linker error, etc.)
 - Apply fix directly (do not delegate back to agents)
 - Retry up to 3 times
-- If still failing after 3 attempts: record the file in `UT_RULES.md ## Project Gotchas` as `[BuildFail] FileName.cc — <error summary>` (do NOT mark TODO.md — coverage.sh will overwrite it), then continue to the coverage step with whatever passes
+- If still failing after 3 attempts: record in `UT_RULES.md ## Project Gotchas` as
+  `[BuildFail] FileName.cc — <error summary>` (do NOT mark TODO.md — coverage.sh will
+  overwrite it). Only use `[BuildFail]` for actual build failures, not runtime crashes or
+  low coverage.
 
 ### 6b. Update Coverage
 ```bash
@@ -126,7 +137,9 @@ This regenerates `TODO.md` with updated percentages.
 
 ### 6c. Check New File Coverage
 
-For each file processed this batch with new coverage <90%: read the coverage HTML report to identify uncovered lines, add targeted tests for those branches, rebuild and recheck. Repeat up to 2 iterations. Every file is expected to be improvable — do not give up and do not add MaxCov entries.
+For each file processed this batch with coverage <90%: read the coverage HTML report to
+identify uncovered lines, add targeted tests for those branches, rebuild and recheck.
+Repeat up to 2 iterations. Every file is expected to be improvable.
 
 ### 6d. Persist Gotchas
 
@@ -157,4 +170,5 @@ Print a report, then STOP. Do not begin another batch.
 Run /ut-pilot:continue for the next batch.
 ```
 
-**CRITICAL**: After printing this report, stop. Do not loop. The user decides when to run the next batch.
+**CRITICAL**: After printing this report, stop. Do not loop. The user decides when to run
+the next batch.

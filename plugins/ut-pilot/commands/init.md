@@ -65,6 +65,8 @@ Then execute in order:
 Write `UT_RULES.md` to the test_root directory (or project root if test_root doesn't exist yet):
 
 ```markdown
+# <ModuleName> Unit Test Rules
+
 ## Configuration
 - source_root: <resolved_absolute_path>
 - test_root: <resolved_absolute_path>
@@ -78,15 +80,35 @@ Write `UT_RULES.md` to the test_root directory (or project root if test_root doe
 - strategy: complex-first
 - current_focus: ""
 
+## Directory Convention
+
+Mirror the `src/` tree under `tests/ut/`:
+```
+src/<module>/subdir/  ->  tests/ut/<module>/subdir/
+```
+
 ## CMake Patterns
-(Populated after first continue run — reference for the specific project's cmake macros)
+
+(Populated after first continue run — documents the specific cmake macros used in this project)
 
 ## Project Gotchas
-(Populated by agents as issues are encountered during test writing)
+
+(Populated by agents as issues are encountered during test writing.
+Entry formats:
+  - [BuildFail] FileName.cc — compilation/link error after 3 fix attempts
+  - [NoCode] FileName.cc — no executable code to instrument
+  - [DeclOnly] FileName.hh — declaration-only header; no inline bodies
+  - Free-form gotcha notes for patterns, fixtures, and workarounds)
 
 ## Max Coverage Files
-Agents MUST attempt Tier 3 (stub/fixture) before adding any entry here.
-Only add entries when compilation itself fails (missing library not on this machine).
+
+Files documented at their maximum achievable coverage. Auto/continue loops exclude these.
+Only add an entry when: (1) the file compiles and tests run, (2) maximum coverage has been
+reached, (3) no further strategy can improve it. Do NOT add [BuildFail] for these files.
+
+## Test Design Guidelines
+
+(Populated by agents with project-specific test patterns and workarounds)
 ```
 
 If `UT_RULES.md` already exists, preserve any existing `## CMake Patterns`, `## Project Gotchas`, and `## Max Coverage Files` sections; only update `## Configuration`.
@@ -206,7 +228,8 @@ echo "Coverage report: $REPORT_DIR/index.html"
 lcov --summary coverage_filtered.info
 ```
 
-**`gen_todo.sh`** in test_root (generates TODO.md — includes ALL source files, even those with no tests):
+**`gen_todo.sh`** in test_root (generates TODO.md — includes ALL source files, with status
+annotations from UT_RULES.md for classified files):
 ```bash
 #!/bin/bash
 # Usage: bash gen_todo.sh [MODULE] [SOURCE_ROOT]
@@ -217,6 +240,30 @@ SOURCE_ROOT="${2:-<source_root>}"
 COV_INFO="${SCRIPT_DIR}/build_cov/coverage_filtered.info"
 SOURCE_ROOT_REAL=$(realpath "$SOURCE_ROOT" 2>/dev/null || echo "$SOURCE_ROOT")
 OUTPUT="${SCRIPT_DIR}/TODO.md"
+UT_RULES_FILE="${SCRIPT_DIR}/UT_RULES.md"
+
+# Parse UT_RULES.md for status labels ([BuildFail], [NoCode], [DeclOnly], [MaxCov])
+declare -A FILE_STATUS_LABEL  # basename -> annotation string
+if [ -f "$UT_RULES_FILE" ]; then
+  # Scan entire file for [BuildFail], [NoCode], [DeclOnly] single-line gotcha entries
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^-[[:space:]]\[(BuildFail|NoCode|DeclOnly)\][[:space:]]([[:alnum:]_.]+)[[:space:]]— ]]; then
+      tag="${BASH_REMATCH[1]}"
+      fname="${BASH_REMATCH[2]}"
+      reason=$(echo "$line" | sed 's/.*— //')
+      FILE_STATUS_LABEL["$fname"]="**[${tag}]** ${reason}"
+    fi
+  done < "$UT_RULES_FILE"
+  # Scan for [MaxCov] entries (format: **[MaxCov] FileName (X%, Y uncov)**: reason)
+  while IFS= read -r line; do
+    if [[ "$line" =~ \[MaxCov\][[:space:]]+([[:alnum:]_.]+)[[:space:]]*\(([0-9]+)% ]]; then
+      fname="${BASH_REMATCH[1]}"
+      pct="${BASH_REMATCH[2]}"
+      reason=$(echo "$line" | sed 's/.*\*\*: //' | sed 's/Maximum achievable.*//' | sed 's/[[:space:]]*$//')
+      FILE_STATUS_LABEL["$fname"]="**[MaxCov ${pct}%]** ${reason}"
+    fi
+  done < "$UT_RULES_FILE"
+fi
 
 declare -A COV_HIT COV_TOTAL
 if [ -f "$COV_INFO" ]; then
@@ -257,12 +304,24 @@ mapfile -t SORTED_DIRS < <(printf '%s\n' "${!DIRS[@]}" | sort)
       [ "$(dirname "$f")" != "$dir" ] && continue
       fname="$(basename "$f")"
       total="${COV_TOTAL[$f]:-0}"; hit="${COV_HIT[$f]:-0}"
+      status_label="${FILE_STATUS_LABEL[$fname]:-}"
       if [ "$total" -eq 0 ]; then
-        echo "- [ ] ${fname} (0%, ? uncov - no tests)"
+        if [ -n "$status_label" ]; then
+          echo "- [ ] ${fname} (0%, ? uncov — ${status_label})"
+        else
+          echo "- [ ] ${fname} (0%, ? uncov - no tests)"
+        fi
       else
         pct=$((hit * 100 / total)); uncov=$((total - hit))
-        [ "$pct" -ge 90 ] && echo "- [x] ${fname} (${pct}% - covered)" || \
-          echo "- [ ] ${fname} (${pct}%, ${uncov} uncov - needs tests)"
+        if [ "$pct" -ge 90 ]; then
+          echo "- [x] ${fname} (${pct}% - covered)"
+        else
+          if [ -n "$status_label" ]; then
+            echo "- [ ] ${fname} (${pct}%, ${uncov} uncov — ${status_label})"
+          else
+            echo "- [ ] ${fname} (${pct}%, ${uncov} uncov - needs tests)"
+          fi
+        fi
       fi
     done
     echo ""

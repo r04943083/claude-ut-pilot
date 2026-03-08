@@ -48,20 +48,27 @@ If `$ARGUMENTS` was empty:
 
 Use exact line replacement — find the line starting with `- current_focus:` and replace it.
 
-## Step 4: Scan the Target Directory
+## Step 4: Refresh TODO.md and Scan the Target Directory
 
 **If focus was cleared**: skip to Step 5 (clear mode report).
 
-For the `resolved_path`, scan all source files:
-- Find all `.h`, `.hh`, `.hpp`, `.cc`, `.cpp`, `.cxx` files under `resolved_path`
-- Cross-reference with `TODO.md` to classify each as: Needs Tests / Covered (>90%) / Skip
+First, ensure TODO.md is up to date:
+- If `<test_root>/build_cov/coverage_filtered.info` exists, run:
+  ```bash
+  cd <test_root> && bash gen_todo.sh
+  ```
+  to regenerate TODO.md from the latest coverage data.
+- If coverage data does not exist yet, note this in the report (suggest running `/ut-pilot:init` first).
+
+Then read TODO.md and classify all files under `resolved_path`:
+- `- [x]` entries → Covered (≥90%)
+- `- [ ]` entries → Needs Tests
+- Source files not in TODO.md at all → also count as Needs Tests (not yet instrumented)
 
 Count:
 - Total source files in directory
-- Already covered (>90%)
-- Needs tests
-- MaxCov documented (in UT_RULES.md ## Max Coverage Files)
-- No test file at all (0%)
+- Already covered (≥90%)
+- Needs tests (all `- [ ]` entries + any uninstrumented files)
 
 Apply the configured `strategy` scoring to order the "Needs Tests" files — show the top 10.
 
@@ -75,7 +82,6 @@ Directory status:
 - Total source files: N
 - Already at >90% coverage: X
 - Need tests: Y
-- MaxCov documented: Z
 
 Next targets (complex-first):
 1. path/to/File1.cc — 0%, ~180 lines

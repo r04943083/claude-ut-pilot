@@ -16,8 +16,7 @@ Read `UT_RULES.md` from the test_root (search: project root, `tests/ut/`, `test/
 - `strategy` (default: complex-first)
 - `current_focus` (empty = global mode; non-empty = restrict to that directory)
 
-Also read `## Max Coverage Files` → build `maxcov_files` set.
-Also read `## Project Gotchas` — pass the path to agents so they can avoid known pitfalls.
+Also read `## Project Gotchas` — pass the path to agents so they can avoid known pitfalls and find existing fixture patterns.
 
 If `UT_RULES.md` is not found, stop and say: "UT_RULES.md not found. Run /ut-pilot:init first."
 
@@ -38,7 +37,7 @@ Then re-read the generated `TODO.md`.
 
 Filter by `current_focus`: if non-empty, only consider files under that path.
 
-Exclude files in `maxcov_files` set and files marked `[BuildFail]`.
+Exclude files recorded as `[BuildFail]` in `UT_RULES.md ## Project Gotchas`. Do NOT exclude any other files — every file must be attempted.
 
 If no actionable files remain, report completion and stop.
 
@@ -80,13 +79,13 @@ Test directory (for CMake patterns): <test_root>/<module>/
 Your task:
 1. Read assigned source files (use LSP document_symbols first if >200 lines)
 2. Check existing CMakeLists.txt in the test directory for cmake patterns
-3. Read UT_RULES.md for gotchas and conventions
+3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for existing fixture patterns)
 4. Write tests targeting >90% line coverage per file
+   - For files with system-context dependencies: search other _ut.cc files in the same module directory for existing fixtures/wrappers and reuse them
+   - The project is guaranteed to compile — there is always a way to write at least one passing test
 5. Update CMakeLists.txt
-6. If you cannot reach >90% due to system dependencies, write what IS testable,
-   then add an entry to UT_RULES.md '## Max Coverage Files' with reason:
-   `- FileName.cc (MaxCov: X%) — reason`
-7. If you discover a gotcha, append it to UT_RULES.md '## Project Gotchas'.
+6. Do NOT add entries to UT_RULES.md '## Max Coverage Files'. Every file can be tested.
+7. If you discover a gotcha or a useful fixture pattern, append it to UT_RULES.md '## Project Gotchas'.
 Report: files created/modified and expected coverage level.
 ```
 
@@ -110,7 +109,7 @@ If build fails:
 - Diagnose the error (missing include, linker error, etc.)
 - Apply fix directly (do not delegate back to agents)
 - Retry up to 3 times
-- If still failing after 3 attempts: mark affected files as `[BuildFail]` in TODO.md, continue to coverage step with whatever passes
+- If still failing after 3 attempts: record the file in `UT_RULES.md ## Project Gotchas` as `[BuildFail] FileName.cc — <error summary>` (do NOT mark TODO.md — coverage.sh will overwrite it), then continue to the coverage step with whatever passes
 
 ### 6b. Update Coverage
 ```bash
@@ -121,7 +120,7 @@ This regenerates `TODO.md` with updated percentages.
 
 ### 6c. Check New File Coverage
 
-For each file processed this batch: if new coverage <90%, re-read `UT_RULES.md ## Max Coverage Files` to check if an agent added a MaxCov entry for it. If not, read the coverage HTML report to identify uncovered lines and add targeted tests for uncovered branches. Rebuild and recheck (max 2 iterations).
+For each file processed this batch with new coverage <90%: read the coverage HTML report to identify uncovered lines, add targeted tests for those branches, rebuild and recheck. Repeat up to 2 iterations. Every file is expected to be improvable — do not give up and do not add MaxCov entries.
 
 ### 6d. Persist Gotchas
 
@@ -137,10 +136,10 @@ Print a report, then STOP. Do not begin another batch.
 | File | Before | After | Status |
 |------|--------|-------|--------|
 | path/to/Foo.cc | 0% | 94% | NEW |
-| path/to/Bar.cc | 23% | 88% | IMPROVED (below 90%) |
-| path/to/Baz.cc | 0% | 0% | MaxCov: 0% — requires PlacerDB |
+| path/to/Bar.cc | 23% | 88% | IMPROVED (below 90%, needs more) |
+| path/to/Baz.cc | 0% | 12% | STARTED (needs more tests) |
 
-**This batch**: processed N files, M newly at >90%, K documented MaxCov
+**This batch**: processed N files, M newly at >90%
 **Overall**: X/Y files at >90% coverage
 **Remaining**: Z files need tests
 

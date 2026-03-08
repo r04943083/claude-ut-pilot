@@ -85,8 +85,8 @@ Write `UT_RULES.md` to the test_root directory (or project root if test_root doe
 (Populated by agents as issues are encountered during test writing)
 
 ## Max Coverage Files
-Files documented at their maximum achievable coverage without full system init:
-(Agents add entries here when a file cannot reach >90% due to system dependencies)
+Agents MUST attempt Tier 3 (stub/fixture) before adding any entry here.
+Only add entries when compilation itself fails (missing library not on this machine).
 ```
 
 If `UT_RULES.md` already exists, preserve any existing `## CMake Patterns`, `## Project Gotchas`, and `## Max Coverage Files` sections; only update `## Configuration`.
@@ -152,8 +152,11 @@ ctest --output-on-failure
 #!/bin/bash
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build_coverage"
+BUILD_DIR="$SCRIPT_DIR/build_cov"
 REPORT_DIR="$SCRIPT_DIR/coverage_report"
+# Set these for your project:
+SOURCE_ROOT="<source_root>"
+MODULE="<ModuleName>"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
@@ -162,89 +165,110 @@ make -j$(nproc)
 ctest --output-on-failure
 
 mkdir -p "$REPORT_DIR"
-lcov --capture --directory . --output-file coverage.info --rc lcov_branch_coverage=1
-lcov --remove coverage.info '/usr/*' '*/gtest/*' '*/gmock/*' --output-file coverage_filtered.info
+# Step 1: baseline (zero for all instrumented lines)
+lcov --capture --initial --directory . --output-file coverage_baseline.info
+# Step 2: actual execution counts
+lcov --capture --directory . --output-file coverage_test.info
 
-# Use realpath so --prefix strips correctly even if SOURCE_ROOT contains symlinks
+# Step 3: zero-fill source files not compiled into any test binary
+coverage_zero="coverage_zero.info"
+> "$coverage_zero"
+covered_files=$(grep '^SF:' coverage_test.info 2>/dev/null | sed 's/^SF://' | sort -u)
+while IFS= read -r -d '' src_file; do
+  if echo "$covered_files" | grep -qxF "$src_file"; then continue; fi
+  echo "TN:" >> "$coverage_zero"
+  echo "SF:${src_file}" >> "$coverage_zero"
+  line_num=0
+  while IFS= read -r _line; do
+    line_num=$((line_num + 1))
+    echo "DA:${line_num},0" >> "$coverage_zero"
+  done < "$src_file"
+  echo "LF:${line_num}" >> "$coverage_zero"
+  echo "LH:0" >> "$coverage_zero"
+  echo "end_of_record" >> "$coverage_zero"
+done < <(find "$SOURCE_ROOT" -type f \( -name '*.hh' -o -name '*.h' -o -name '*.cc' \) -print0 | sort -z)
+
+# Step 4: merge + extract
+lcov --add-tracefile coverage_baseline.info \
+     --add-tracefile coverage_test.info \
+     --add-tracefile coverage_zero.info \
+     --output-file coverage_merged.info
+lcov --extract coverage_merged.info "*/${MODULE}/source/*" --output-file coverage_filtered.info
+
+# HTML report
 SOURCE_ROOT_REAL=$(realpath "$SOURCE_ROOT")
-genhtml coverage_filtered.info --output-directory "$REPORT_DIR" --branch-coverage --prefix "$SOURCE_ROOT_REAL"
+genhtml coverage_filtered.info --output-directory "$REPORT_DIR" --prefix "$SOURCE_ROOT_REAL"
 
-# Generate TODO.md
-python3 "$SCRIPT_DIR/gen_todo.py" coverage_filtered.info "$SCRIPT_DIR/TODO.md" || \
-  lcov --list coverage_filtered.info > "$SCRIPT_DIR/coverage_summary.txt"
+# Generate TODO.md (includes ALL source files, even uninstrumented ones)
+bash "$SCRIPT_DIR/gen_todo.sh" "$MODULE" "$SOURCE_ROOT"
 
 echo "Coverage report: $REPORT_DIR/index.html"
+lcov --summary coverage_filtered.info
 ```
 
-**`gen_todo.py`** in test_root (generates TODO.md from lcov info):
-```python
-#!/usr/bin/env python3
-"""Parse lcov .info file and generate TODO.md in directory-organized bullet list format."""
-import sys, os
-from datetime import datetime
-from collections import defaultdict
+**`gen_todo.sh`** in test_root (generates TODO.md — includes ALL source files, even those with no tests):
+```bash
+#!/bin/bash
+# Usage: bash gen_todo.sh [MODULE] [SOURCE_ROOT]
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODULE="${1:-MyModule}"
+SOURCE_ROOT="${2:-<source_root>}"
+COV_INFO="${SCRIPT_DIR}/build_cov/coverage_filtered.info"
+SOURCE_ROOT_REAL=$(realpath "$SOURCE_ROOT" 2>/dev/null || echo "$SOURCE_ROOT")
+OUTPUT="${SCRIPT_DIR}/TODO.md"
 
-def parse_lcov(info_file):
-    files = {}
-    current = None
-    with open(info_file) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith('SF:'):
-                current = line[3:]
-                files[current] = {'lines_found': 0, 'lines_hit': 0}
-            elif line.startswith('LF:') and current:
-                files[current]['lines_found'] = int(line[3:])
-            elif line.startswith('LH:') and current:
-                files[current]['lines_hit'] = int(line[3:])
-    return files
+declare -A COV_HIT COV_TOTAL
+if [ -f "$COV_INFO" ]; then
+  current_file=""
+  hit=0; total=0
+  while IFS= read -r line; do
+    case "$line" in
+      SF:*)
+        current_file="${line#SF:}"
+        current_file="${current_file#$SOURCE_ROOT/}"
+        current_file="${current_file#$SOURCE_ROOT_REAL/}"
+        hit=0; total=0 ;;
+      DA:*)
+        exec_count="${line#DA:}"; exec_count="${exec_count#*,}"; exec_count="${exec_count%%,*}"
+        total=$((total + 1))
+        [ "$exec_count" -gt 0 ] 2>/dev/null && hit=$((hit + 1)) ;;
+      end_of_record)
+        [ -n "$current_file" ] && [ "$total" -gt 0 ] && \
+          COV_HIT["$current_file"]=$hit && COV_TOTAL["$current_file"]=$total
+        current_file="" ;;
+    esac
+  done < "$COV_INFO"
+fi
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: gen_todo.py coverage.info TODO.md [source_root]")
-        sys.exit(1)
-    info_file, todo_file = sys.argv[1], sys.argv[2]
-    source_root = sys.argv[3].rstrip('/') if len(sys.argv) > 3 else ''
+mapfile -t ALL_FILES < <(cd "$SOURCE_ROOT" && find . -type f \( -name '*.hh' -o -name '*.h' -o -name '*.cc' \) | sed 's|^\./||' | sort)
+declare -A DIRS
+for f in "${ALL_FILES[@]}"; do DIRS["$(dirname "$f")"]=1; done
+mapfile -t SORTED_DIRS < <(printf '%s\n' "${!DIRS[@]}" | sort)
 
-    files = parse_lcov(info_file)
-
-    # Strip source_root prefix to get relative paths
-    rel_files = {}
-    for path, data in files.items():
-        rel = path[len(source_root)+1:] if source_root and path.startswith(source_root + '/') else path
-        rel_files[rel] = data
-
-    # Group by directory
-    by_dir = defaultdict(list)
-    for rel_path, data in sorted(rel_files.items()):
-        d = os.path.dirname(rel_path)
-        by_dir[d].append((os.path.basename(rel_path), rel_path, data))
-
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    with open(todo_file, 'w') as f:
-        f.write(f"# Unit Test Coverage TODO\n\nAuto-generated on {now}\n\n")
-        for d in sorted(by_dir.keys()):
-            depth = d.count('/') + 2 if d else 1
-            heading = '#' * depth
-            label = d if d else '(root)'
-            f.write(f"{heading} {label}\n\n")
-            for fname, rel_path, data in sorted(by_dir[d]):
-                found = data['lines_found']
-                hit = data['lines_hit']
-                if found == 0:
-                    f.write(f"- [ ] {fname} (0%, ? uncov - no tests)\n")
-                else:
-                    pct = int(hit / found * 100)
-                    uncov = found - hit
-                    if pct >= 90:
-                        f.write(f"- [x] {fname} ({pct}% - covered)\n")
-                    else:
-                        f.write(f"- [ ] {fname} ({pct}%, {uncov} uncov - needs tests)\n")
-            f.write("\n")
-    print(f"TODO.md written: {len(rel_files)} files")
-
-if __name__ == '__main__':
-    main()
+{
+  echo "# ${MODULE} Unit Test Coverage TODO"
+  echo ""; echo "Auto-generated by gen_todo.sh on $(date '+%Y-%m-%d %H:%M:%S')"; echo ""
+  for dir in "${SORTED_DIRS[@]}"; do
+    rel_dir="$dir"; [ -z "$rel_dir" ] || [ "$rel_dir" = "." ] && rel_dir="(root)"
+    depth=$(echo "$rel_dir" | tr -cd '/' | wc -c); depth=$((depth + 2))
+    printf '%0.s#' $(seq 1 $depth); echo " ${rel_dir}"; echo ""
+    for f in "${ALL_FILES[@]}"; do
+      [ "$(dirname "$f")" != "$dir" ] && continue
+      fname="$(basename "$f")"
+      total="${COV_TOTAL[$f]:-0}"; hit="${COV_HIT[$f]:-0}"
+      if [ "$total" -eq 0 ]; then
+        echo "- [ ] ${fname} (0%, ? uncov - no tests)"
+      else
+        pct=$((hit * 100 / total)); uncov=$((total - hit))
+        [ "$pct" -ge 90 ] && echo "- [x] ${fname} (${pct}% - covered)" || \
+          echo "- [ ] ${fname} (${pct}%, ${uncov} uncov - needs tests)"
+      fi
+    done
+    echo ""
+  done
+} > "$OUTPUT"
+echo "Generated ${OUTPUT} (${#ALL_FILES[@]} files)"
 ```
 
 ### 3c. Create Sample Test

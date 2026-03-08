@@ -263,13 +263,12 @@ TEST(FileReaderTest, ReadsCorrectly) {
 ```
 
 ### Classes with deep system dependencies (DB / full context)
-If the constructor requires a database object that cannot be constructed in isolation:
-- Write tests for any methods that ARE callable without the full system context
-- Add an entry to `UT_RULES.md ## Max Coverage Files` documenting the max achievable coverage and reason:
-  ```
-  - FileName.cc (MaxCov: X%) — constructor dereferences PlacerDB immediately
-  ```
-- Do not leave the file with zero attempt — test what you can, document what you cannot
+If the constructor requires a database or system-context object, use this escalation order:
+
+1. **Search existing fixtures first**: Look in `_ut.cc` files in the SAME module directory for MinimalWrapper / test-fixture classes that already set up the required dependency. Reuse them.
+2. **Write a minimal stub**: If no fixture exists, write a minimal concrete subclass or struct that satisfies the required interface with no-op or hardcoded values.
+3. **Test pure-logic methods standalone**: Static methods, pure-math utilities, enum accessors, and config getters do not need system context — test those first.
+4. **Never give up without compiling**: The project is guaranteed to compile. Write at least one passing test for every file.
 
 ---
 
@@ -282,11 +281,11 @@ Use this to classify files for strategy scoring:
 | **Easy** | Header-only (no `.cc`), or `.cc` <50 lines, few internal includes |
 | **Medium** | Has `.cc`, 50-150 lines, <5 internal includes, no system-level deps |
 | **Hard** | Has `.cc`, >150 lines, many internal includes, some system deps but mockable |
-| **System-Dependent** | Requires database/full-system context in constructor, external services, or integration-level setup — test what you can, document MaxCov |
+| **System-Dependent** | Requires database/full-system context in constructor, external services, or integration-level setup — find or write a minimal fixture/stub, then test through it |
 
 Complexity score for **complex-first**:
 - Has `.cc`: +2
 - `.cc` >100 lines: +1
 - Uncovered lines above median for the module: +1
 - Internal includes >6: +1 (capped at +2 total for this)
-- System-level dependency: mark Skip
+- System-level dependency: find or write a stub/fixture (see "Classes with deep system dependencies" above)

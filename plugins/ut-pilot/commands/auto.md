@@ -11,7 +11,6 @@ description: "Automatically loop continue until all files reach >90% coverage"
 Read `UT_RULES.md`. If not found, stop: "UT_RULES.md not found. Run /ut-pilot:init first."
 
 Parse: `parallel_agents`, `files_per_batch`, `strategy`, `current_focus`.
-Read `## Max Coverage Files` section → build `maxcov_files` set (all file paths listed there).
 
 Initialize loop state:
 - `batch_number` = 0
@@ -32,12 +31,12 @@ Read `TODO.md`. Format: directory sections with bullet entries:
 - `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` → actionable
 
-Collect all `- [ ]` entries. Exclude: files in `maxcov_files` set, files marked `[BuildFail]`.
+Collect all `- [ ]` entries. Exclude files recorded as `[BuildFail]` in `UT_RULES.md ## Project Gotchas`. Do NOT exclude any other files — every file must be attempted.
 
 Apply `current_focus` filter if set.
 
 **Terminal check — exit if**:
-- Remaining (not excluded) == 0 → Exit: All Done
+- No `- [ ]` entries remain (all files are `- [x]` at ≥90%, or noted as BuildFail in UT_RULES.md) → Exit: All Done
 
 **B. Score and Select Batch**
 
@@ -65,13 +64,13 @@ Test directory (for CMake patterns): <test_root>/<module>/
 Your task:
 1. Read assigned source files (use LSP document_symbols first if >200 lines)
 2. Check existing CMakeLists.txt in the test directory for cmake patterns
-3. Read UT_RULES.md for gotchas and conventions
+3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for existing fixture patterns)
 4. Write tests targeting >90% line coverage per file
+   - For files with system-context dependencies: search other _ut.cc files in the same module directory for existing fixtures/wrappers and reuse them
+   - The project is guaranteed to compile — there is always a way to write at least one passing test
 5. Update CMakeLists.txt
-6. If you cannot reach >90% due to system dependencies, write what IS testable,
-   then add an entry to UT_RULES.md '## Max Coverage Files' with reason:
-   `- FileName.cc (MaxCov: X%) — reason`
-7. If you discover a gotcha, append it to UT_RULES.md '## Project Gotchas'.
+6. Do NOT add entries to UT_RULES.md '## Max Coverage Files'. Every file can be tested.
+7. If you discover a gotcha or a useful fixture pattern, append it to UT_RULES.md '## Project Gotchas'.
 Report: files created/modified and expected coverage level.
 ```
 
@@ -83,7 +82,7 @@ Wait for all agents to complete.
 cd <test_root> && bash run_tests.sh
 ```
 
-If build fails: fix (up to 3 attempts). If still failing after 3 attempts, mark affected files `[BuildFail]` in TODO.md.
+If build fails: fix (up to 3 attempts). If still failing after 3 attempts, record affected files as `[BuildFail] FileName.cc — <error>` in `UT_RULES.md ## Project Gotchas` (do NOT write to TODO.md — it gets overwritten by coverage.sh).
 
 ```bash
 cd <test_root> && bash coverage.sh
@@ -91,29 +90,26 @@ cd <test_root> && bash coverage.sh
 
 This regenerates TODO.md. Count how many files newly crossed 90%.
 
-**E. Update maxcov_files**
-
-Re-read `UT_RULES.md` `## Max Coverage Files` section. Any newly added entries = progress for this batch.
-
-**F. Progress Report**
+**E. Progress Report**
 
 ```
 --- Batch <N> complete ---
 Processed: <list of files>
 Newly at >90%: X files
-Newly documented MaxCov: Y files
-Overall: <covered + maxcov> / <total> files resolved
+Overall: <covered> / <total> files at >90%
 Remaining: <Z> files need tests
 --------------------------
 ```
 
 Increment `batch_number`, add to `total_files_processed`.
 
-**G. Persist Gotchas**
+**F. Persist Gotchas and Build Failures**
 
-Ensure any new gotchas discovered this batch are saved to UT_RULES.md.
+- Save any new gotchas discovered this batch to `UT_RULES.md ## Project Gotchas`.
+- If any file had an unrecoverable build failure, record it in `UT_RULES.md ## Project Gotchas` as:
+  `- [BuildFail] FileName.cc — <error summary>` (do NOT mark TODO.md, it gets overwritten by coverage.sh)
 
-**H. No pause — go to next iteration immediately.**
+**G. No pause — go to next iteration immediately.**
 
 ---
 
@@ -121,7 +117,7 @@ Ensure any new gotchas discovered this batch are saved to UT_RULES.md.
 
 | Condition | Exit Message |
 |-----------|-------------|
-| All files ≥90% or in MaxCov set or [BuildFail] | "All Done" report |
+| All `- [ ]` entries gone (files reached ≥90% or are recorded as `[BuildFail]` in UT_RULES.md) | "All Done" report |
 
 ## Exit Report
 
@@ -131,12 +127,11 @@ Ensure any new gotchas discovered this batch are saved to UT_RULES.md.
 ## Auto Complete
 
 Processed <N> batches, <M> total files.
-All files are now either at >90% coverage or documented in Max Coverage Files.
+All files are now at >90% coverage (or recorded as [BuildFail] in UT_RULES.md).
 
 Final coverage:
 - At >90%: X files
-- MaxCov documented: Y files
-- [BuildFail]: W files
+- [BuildFail] (see UT_RULES.md ## Project Gotchas): W files
 
 Run /ut-pilot:status for a full breakdown.
 ```

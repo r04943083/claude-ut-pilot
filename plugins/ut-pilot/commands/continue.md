@@ -88,7 +88,9 @@ Test directory (for CMake patterns): <test_root>/<module>/
 
 Your task:
 1. Read assigned source files (use LSP document_symbols first if >200 lines)
-2. Check existing CMakeLists.txt in the test directory for cmake patterns
+2. Check existing CMakeLists.txt in the test directory for cmake patterns.
+   **Look for `ut_add_simple_test` macro availability (in cmake/UTHelpers.cmake or
+   CMakeLists.txt). If available, ALWAYS use it instead of manual include/lib specifications.**
 3. Read UT_RULES.md for gotchas and conventions (especially ## Project Gotchas for
    existing fixture patterns)
 4. Classify each file (NoCode / DeclOnly / BuildFail / testable) — see SKILL.md
@@ -96,7 +98,12 @@ Your task:
    - For files with system-context dependencies: search other _ut.cc files in the same
      module directory for existing fixtures/wrappers and reuse them
    - For files that cannot be recompiled from source: use the prebuilt library strategy
-6. Update CMakeLists.txt
+6. Update CMakeLists.txt using the **simplest available pattern**:
+   PREFERRED: `ut_add_simple_test` if aggregator is available.
+   FALLBACK: `ut_add_test` or manual.
+   **If the build system is verbose (same includes/libs repeated >3 targets) and no
+   aggregator exists, note in UT_RULES.md `## Project Gotchas`:
+   `[CMakeVerbose] <directory> — consider aggregator target`.**
 7. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
    Do NOT add entries to ## Max Coverage Files unless a file genuinely cannot exceed the
    documented ceiling after exhausting all strategies.

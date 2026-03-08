@@ -17,6 +17,8 @@ Scan the project silently (no output yet). Detect:
 5. **Naming convention**: Look at existing test files — do they use `_test.cc`, `_ut.cc`, `_test.cpp`?
 6. **Coverage tooling**: Look for `.lcovrc`, `coverage.sh`, `lcov`, `gcovr`
 7. **Simplest source file**: Find a .h/.cc pair with minimal dependencies for the sample test
+8. **Prebuilt libraries**: Look for `build/lib/`, `build/release/lib/`, `install/lib/` for `.a` files. Count how many exist.
+9. **Include complexity**: Count distinct `target_include_directories` or `-I` entries across existing CMakeLists.txt. If >10 unique dirs, flag as "complex include tree".
 
 Also check if `UT_RULES.md` already exists (re-init scenario).
 
@@ -39,6 +41,7 @@ Auto-detected configuration:
 | parallel_agents   | 5                      | concurrent agents per batch    |
 | files_per_batch   | 10                     | files processed per batch      |
 | strategy          | complex-first          | complex-first / medium-first / simple-first |
+| build_simplification | basic               | aggregator if prebuilt libs >5 or include dirs >10 |
 ```
 
 Then use **one** `AskUserQuestion` call to ask these 4 key settings:
@@ -78,6 +81,7 @@ Write `UT_RULES.md` to the test_root directory (or project root if test_root doe
 - parallel_agents: 5
 - files_per_batch: 10
 - strategy: complex-first
+- build_simplification: basic
 - current_focus: ""
 
 ## Directory Convention
@@ -117,7 +121,7 @@ If `UT_RULES.md` already exists, preserve any existing `## CMake Patterns`, `## 
 
 Do NOT overwrite existing files. Check existence first.
 
-**`CMakeLists.txt`** in test_root:
+**When `build_simplification: basic`** (default), generate **`CMakeLists.txt`** in test_root:
 ```cmake
 cmake_minimum_required(VERSION 3.14)
 project(<ModuleName>_UnitTests)
@@ -155,6 +159,134 @@ endmacro()
 # Add test subdirectories below
 # add_subdirectory(submodule)
 ```
+
+**When `build_simplification: aggregator`**, generate **three files** instead of one:
+
+**1. `CMakeLists.txt`** in test_root:
+```cmake
+cmake_minimum_required(VERSION 3.14)
+project(<ModuleName>_UnitTests)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
+
+if(ENABLE_COVERAGE)
+  add_compile_options(-O0 -g --coverage -fprofile-arcs -ftest-coverage)
+  add_link_options(--coverage)
+endif()
+
+find_package(GTest REQUIRED)
+include(CTest)
+enable_testing()
+
+# Source root (adjust if needed)
+set(SRC_ROOT <source_root>)
+
+# Aggregator target and helper macros
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/UTHelpers.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/module_config.cmake)
+
+# Add test subdirectories below
+# add_subdirectory(submodule)
+```
+
+**2. `cmake/UTHelpers.cmake`** in test_root:
+```cmake
+# Reusable UT helper macros
+# Backward-compatible macros
+macro(ut_add_module_sources)
+  cmake_parse_arguments(ARG "" "NAME" "SOURCES;INCLUDES;LIBS;PREBUILT_LIB" ${ARGN})
+  if(ARG_SOURCES AND NOT "${ARG_SOURCES}" STREQUAL "")
+    add_library(${ARG_NAME} OBJECT ${ARG_SOURCES})
+    if(ARG_INCLUDES)
+      target_include_directories(${ARG_NAME} PRIVATE ${ARG_INCLUDES})
+    endif()
+  endif()
+endmacro()
+
+macro(ut_add_test)
+  cmake_parse_arguments(ARG "" "NAME" "SOURCES;DEPENDS;INCLUDES;LIBS" ${ARGN})
+  add_executable(${ARG_NAME} ${ARG_SOURCES})
+  if(ARG_INCLUDES)
+    target_include_directories(${ARG_NAME} PRIVATE ${ARG_INCLUDES})
+  endif()
+  if(ARG_DEPENDS)
+    target_link_libraries(${ARG_NAME} PRIVATE ${ARG_DEPENDS})
+  endif()
+  target_link_libraries(${ARG_NAME} PRIVATE GTest::gtest_main pthread ${ARG_LIBS})
+  add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+endmacro()
+
+# Zero-config test macro using aggregator target
+# Usage:
+#   ut_add_simple_test(NAME Foo_ut SOURCES Foo_ut.cc)
+#   ut_add_simple_test(NAME Foo_ut SOURCES Foo_ut.cc COVERAGE_SOURCES /path/to/Foo.cc)
+#   ut_add_simple_test(NAME Foo_ut SOURCES Foo_ut.cc COVERAGE_SOURCES /path/to/Foo.cc
+#                      COVERAGE_COMPILE_OPTIONS -fopenmp -include /path/to/header.hh)
+function(ut_add_simple_test)
+  cmake_parse_arguments(ARG "" "NAME" "SOURCES;COVERAGE_SOURCES;COVERAGE_COMPILE_OPTIONS" ${ARGN})
+
+  # Coverage OBJECT library: recompile specific sources with instrumentation
+  set(_extra_objects "")
+  if(ENABLE_COVERAGE AND ARG_COVERAGE_SOURCES)
+    set(_cov_target ${ARG_NAME}_cov)
+    add_library(${_cov_target} OBJECT ${ARG_COVERAGE_SOURCES})
+    target_link_libraries(${_cov_target} PRIVATE ${PROJECT_UT_DEPS_TARGET})
+    target_compile_options(${_cov_target} PRIVATE -O0 -g --coverage -fprofile-arcs -ftest-coverage)
+    if(ARG_COVERAGE_COMPILE_OPTIONS)
+      target_compile_options(${_cov_target} PRIVATE ${ARG_COVERAGE_COMPILE_OPTIONS})
+    endif()
+    set(_extra_objects $<TARGET_OBJECTS:${_cov_target}>)
+  endif()
+
+  add_executable(${ARG_NAME} ${ARG_SOURCES} ${_extra_objects})
+  target_link_libraries(${ARG_NAME} PRIVATE
+    ${PROJECT_UT_DEPS_TARGET}
+    GTest::gtest_main
+    pthread
+  )
+  add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+endfunction()
+```
+
+**3. `module_config.cmake`** in test_root:
+```cmake
+# Project-specific aggregator target for unit test dependencies
+# Edit this file to match your project's include directories and libraries.
+
+set(PROJECT_UT_DEPS_TARGET <ModuleName>_ut_deps)
+add_library(${PROJECT_UT_DEPS_TARGET} INTERFACE)
+
+# --- Include directories ---
+# Add all directories that test files need to compile.
+# target_include_directories(${PROJECT_UT_DEPS_TARGET} INTERFACE
+#   ${SRC_ROOT}
+#   ${SRC_ROOT}/include
+#   ${SRC_ROOT}/third_party
+# )
+
+# --- Prebuilt static libraries ---
+# Use --start-group/--end-group for circular dependencies between .a files.
+# Use --allow-multiple-definition so coverage OBJECT libs can override prebuilt symbols.
+# set(BUILD_LIB_DIR "${SRC_ROOT}/../build/lib")
+# target_link_libraries(${PROJECT_UT_DEPS_TARGET} INTERFACE
+#   -Wl,--start-group
+#   ${BUILD_LIB_DIR}/libmodule_a.a
+#   ${BUILD_LIB_DIR}/libmodule_b.a
+#   -Wl,--end-group
+#   -Wl,--allow-multiple-definition
+#   -Wl,--unresolved-symbols=ignore-all
+# )
+
+# --- System libraries ---
+# target_link_libraries(${PROJECT_UT_DEPS_TARGET} INTERFACE
+#   glog pthread
+# )
+```
+
+Create the `cmake/` directory under test_root before writing `UTHelpers.cmake`.
 
 **`run_tests.sh`** in test_root:
 ```bash
@@ -335,7 +467,9 @@ echo "Generated ${OUTPUT} (${#ALL_FILES[@]} files)"
 Find the simplest source file (smallest .cc file with a corresponding .h, fewest includes):
 1. Read the .h and .cc
 2. Write a minimal test file at `<test_root>/<mirrored_path>/<FileName>_ut.cc`
-3. Add a matching entry in CMakeLists.txt
+3. Add a matching entry in CMakeLists.txt:
+   - If `build_simplification: aggregator`, use `ut_add_simple_test(NAME FileName_ut SOURCES FileName_ut.cc)`
+   - Otherwise, use the basic `ut_add_test` or manual pattern
 
 ### 3d. Verify Infrastructure
 
@@ -361,6 +495,10 @@ Infrastructure ready:
 - CMakeLists.txt, run_tests.sh, coverage.sh created
 - Sample test: <test_root>/path/to/SampleFile_ut.cc (PASSING)
 - TODO.md: <N> files need tests
+
+(If build_simplification: aggregator)
+- cmake/UTHelpers.cmake — helper macros including ut_add_simple_test
+- module_config.cmake — aggregator target definition (edit to add your include dirs and libs)
 
 Next step: /ut-pilot:continue
 ```

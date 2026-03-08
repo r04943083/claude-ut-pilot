@@ -225,6 +225,31 @@ ut_add_test(
 If the source is compiled into an OBJECT library or static lib target, link against that
 instead of re-listing `.cc` files.
 
+Using aggregator target (PREFERRED when available — check for `ut_add_simple_test`
+in cmake/UTHelpers.cmake or CMakeLists.txt):
+```cmake
+# Header-only or prebuilt-only — no manual includes or libs needed
+ut_add_simple_test(NAME FileName_ut SOURCES FileName_ut.cc)
+
+# With coverage instrumentation for specific source files
+ut_add_simple_test(
+  NAME FileName_ut
+  SOURCES FileName_ut.cc
+  COVERAGE_SOURCES ${SRC_ROOT}/path/to/FileName.cc
+)
+
+# With extra compile options for coverage sources (e.g., OpenMP, force-includes)
+ut_add_simple_test(
+  NAME FileName_ut
+  SOURCES FileName_ut.cc
+  COVERAGE_SOURCES ${SRC_ROOT}/path/to/FileName.cc
+  COVERAGE_COMPILE_OPTIONS -fopenmp -include ${SRC_ROOT}/util/usage.hh
+)
+```
+
+Priority: always use `ut_add_simple_test` if defined. Fall back to `ut_add_test`
+or manual patterns only if the aggregator target is not set up.
+
 ### Step 5: Build and Verify
 
 ```bash
@@ -258,6 +283,94 @@ For each file you wrote tests for: verify >90% line coverage. If below:
 | Segfault / ASAN null-deref | Dereferencing uninitialized pointer | Construct proper objects; avoid passing nullptr unless testing null handling |
 | `cannot instantiate abstract class` | Class has pure virtual methods | Create a minimal concrete subclass in the test file for testing |
 | Test links but coverage is 0% | Coverage instrumentation not enabled at build time | Ensure test was built with `ENABLE_COVERAGE=ON` |
+
+---
+
+## Build System Simplification
+
+### When to Use an Aggregator Target
+
+Consider the aggregator pattern when:
+- The project has **>5 test targets** sharing the same include directories
+- There are **>5 shared include directories** across tests
+- Tests link against **prebuilt `.a` files** from the project's build output
+- **OpenMP detection** or other `find_package()` calls are duplicated across targets
+- The same `target_include_directories` / `target_link_libraries` blocks are copy-pasted
+
+### INTERFACE Aggregator Target
+
+Create a single INTERFACE library that bundles all shared dependencies:
+
+```cmake
+# In module_config.cmake
+set(PROJECT_UT_DEPS_TARGET myproject_ut_deps)
+add_library(${PROJECT_UT_DEPS_TARGET} INTERFACE)
+
+target_include_directories(${PROJECT_UT_DEPS_TARGET} INTERFACE
+  ${SRC_ROOT}
+  ${SRC_ROOT}/include
+  # ... all shared include dirs
+)
+
+target_link_libraries(${PROJECT_UT_DEPS_TARGET} INTERFACE
+  -Wl,--start-group
+  ${BUILD_LIB_DIR}/libmodule_a.a
+  ${BUILD_LIB_DIR}/libmodule_b.a
+  -Wl,--end-group
+  -Wl,--allow-multiple-definition
+  -Wl,--unresolved-symbols=ignore-all
+  glog pthread
+)
+```
+
+Every test links against this single target — no per-test include/lib boilerplate.
+
+### `ut_add_simple_test` Macro
+
+Zero-config test registration:
+
+```cmake
+ut_add_simple_test(NAME Foo_ut SOURCES Foo_ut.cc)
+```
+
+Optional parameters:
+- **`COVERAGE_SOURCES`** — `.cc` files to recompile with coverage instrumentation. These are
+  compiled as an OBJECT library (`${NAME}_cov`) when `ENABLE_COVERAGE=ON`, linked before
+  prebuilt `.a` files so instrumented symbols take precedence.
+- **`COVERAGE_COMPILE_OPTIONS`** — extra flags for the coverage OBJECT library (e.g., `-fopenmp`,
+  `-include header.hh`).
+
+### Coverage OBJECT Library Pattern
+
+When `COVERAGE_SOURCES` is provided and `ENABLE_COVERAGE=ON`:
+1. A `${NAME}_cov` OBJECT library is created from the coverage sources
+2. Coverage compile flags are applied to this OBJECT lib
+3. The OBJECT lib is linked into the test executable **before** prebuilt `.a` files
+4. The linker's `--allow-multiple-definition` flag lets the instrumented symbols win over
+   the prebuilt (non-instrumented) versions
+
+This gives real line coverage for specific source files without recompiling the entire project.
+
+### Linker Flag Reference
+
+| Flag | Purpose |
+|------|---------|
+| `--start-group` / `--end-group` | Resolve circular dependencies between `.a` files |
+| `--allow-multiple-definition` | Let coverage OBJECT symbols coexist with prebuilt `.a` symbols |
+| `--unresolved-symbols=ignore-all` | Partial linking when transitive dependencies are unavailable |
+
+### Recognizing Verbose CMake
+
+Signs that the build system would benefit from an aggregator:
+- Same `target_include_directories` block repeated across **>3 targets**
+- Same `target_link_libraries` list copy-pasted in multiple places
+- Duplicated `find_package(OpenMP)` or similar detection blocks
+- Per-test `--unresolved-symbols=ignore-all` flags
+
+When spotted, record in `UT_RULES.md ## Project Gotchas`:
+```
+- [CMakeVerbose] <directory> — consider aggregator target
+```
 
 ---
 
@@ -393,6 +506,11 @@ ut_add_test(
 This is acceptable when the goal is to verify that the test builds and exercises the public
 interface. Record the result as `[MaxCov 0%]` in `UT_RULES.md ## Max Coverage Files`.
 If source compilation is feasible, always prefer `SOURCES file.cc` to get real coverage.
+
+**With an aggregator target**: Prebuilt library linking is handled automatically by the
+aggregator's `target_link_libraries`. No per-test `--unresolved-symbols=ignore-all` is needed.
+Use `COVERAGE_SOURCES` in `ut_add_simple_test` to get real coverage for specific files while
+the aggregator provides all other symbols.
 
 ---
 

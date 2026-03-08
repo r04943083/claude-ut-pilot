@@ -37,7 +37,13 @@ Then re-read the generated `TODO.md`.
 
 Filter by `current_focus`: if non-empty, only consider files under that path.
 
-Exclude files recorded as `[BuildFail]` in `UT_RULES.md ## Project Gotchas`. Do NOT exclude any other files — every file must be attempted.
+Exclude files that match ANY of the following in UT_RULES.md:
+- Recorded as `[BuildFail]` in `## Project Gotchas`
+- Recorded as `[NoCode]` in `## Project Gotchas`
+- Recorded as `[DeclOnly]` in `## Project Gotchas`
+- Listed in `## Max Coverage Files` (已达到文档记录的覆盖率上限)
+
+Do NOT exclude any other files — every file must be attempted.
 
 If no actionable files remain, report completion and stop.
 

@@ -21,6 +21,40 @@ This file is referenced by agents spawned during parallel test writing.
 
 ---
 
+## Step 0: 开始前先分类文件
+
+写测试前必须先分类，避免错误的 [BuildFail] 标签：
+
+### 分类 A — [NoCode]：无可执行代码
+- 所有方法体都被注释掉（如 DPNode.cc, Geometry.cc）
+- class 体为空（如 PostGPConfig.hh `class X {};`）
+- 纯 enum 定义（如 Orient.hh）
+- 纯宏/typedef 定义（如 Log.hh）
+
+**处理**：写一个编译验证测试（`TEST(X, Compiles) { SUCCEED(); }`），
+在 UT_RULES.md ## Project Gotchas 记录为 `[NoCode] FileName — reason`。
+**不要写 [BuildFail]**。
+
+### 分类 B — [DeclOnly]：仅声明的 .hh
+- 只有 class 声明和方法签名，没有 inline 方法体 `{ }`
+- 没有带值的数据成员初始化
+
+**处理**：gcov 永远无法对非可执行的声明行插桩，0% 是预期行为。
+不需要测试，也**不要写 [BuildFail]**。
+在 UT_RULES.md ## Project Gotchas 记录为 `[DeclOnly] FileName.hh — declaration-only header`。
+
+### 分类 C — 编译失败 vs 运行时崩溃（重要区分）
+
+| 情况 | 分类 | 处理方式 |
+|---|---|---|
+| `cmake` 构建命令返回非0（编译器/链接器错误） | [BuildFail] | 修复或 3 次后记录 |
+| cmake 成功但测试二进制运行时崩溃 | **不是** [BuildFail] | 用 prebuilt .a 绕开崩溃路径 |
+| 文件编译正常但覆盖率达到上限 | **不是** [BuildFail] | 记录 [MaxCov] |
+
+**你必须实际运行 cmake 才能添加 [BuildFail]。仅靠读代码推断不允许添加 [BuildFail]。**
+
+---
+
 ## Write Test Workflow
 
 ### Step 1: Read and Understand the Source
@@ -289,3 +323,51 @@ Complexity score for **complex-first**:
 - Uncovered lines above median for the module: +1
 - Internal includes >6: +1 (capped at +2 total for this)
 - System-level dependency: find or write a stub/fixture (see "Classes with deep system dependencies" above)
+
+### 利用 src 预编译库（prebuilt .a）处理系统依赖文件
+
+当一个 .cc 文件的 include 链包含 PLAPI/IDB builder 等重型系统头文件时：
+
+**优先策略**：不从源码重新编译，用预编译 .a 满足链接依赖：
+
+```cmake
+# 1. 用 SOURCES "" 让 UTHelpers 创建纯导入库（不重新编译源文件）
+ut_add_module_sources(
+  NAME mymodule_prebuilt
+  SOURCES ""
+  INCLUDES ${INCLUDE_DIRS}
+  PREBUILT_LIB ${IEDA_BUILD_LIB}/libipl-module-xyz.a
+  LIBS glog
+)
+
+# 2. 测试链接多个 prebuilt .a，用 --unresolved-symbols=ignore-all 跳过无法解析的符号
+ut_add_test(
+  NAME MyModule_ut
+  SOURCES MyModule_ut.cc
+  DEPENDS mymodule_prebuilt
+  INCLUDES ${INCLUDE_DIRS}
+  LIBS
+    ${IEDA_BUILD_LIB}/libipl-api.a
+    ${IEDA_BUILD_LIB}/libipl-source.a
+    ${IEDA_BUILD_LIB}/libipl-configurator.a
+    ${IEDA_BUILD_LIB}/libipl-module-topology_manager.a
+    ${IEDA_BUILD_LIB}/libipl-module-grid_manager.a
+    ${IEDA_BUILD_LIB}/libflute.a
+    ${IEDA_BUILD_LIB}/libusage.a
+    glog pthread ${_OMP_LIB}
+    -Wl,--unresolved-symbols=ignore-all   # 允许链接时存在未解析符号
+)
+```
+
+注意：用这个模式时，该 .cc 文件本身的覆盖率为 0%（prebuilt 不含插桩）。
+这是可以接受的 —— 目标是让测试能构建和运行，然后记录 [MaxCov 0%]。
+如果能从源码编译（有些文件可以），则使用 `SOURCES file.cc` 方式以获得覆盖率。
+
+### [MaxCov] 记录规范
+
+当文件构建正常、测试能运行，但覆盖率因架构原因无法再提升时：
+1. 达到最大可达覆盖率后记录
+2. 在 UT_RULES.md ## Max Coverage Files 新增条目：
+   `- **[MaxCov] FileName.cc (X%, Y uncov)**: 原因说明。Maximum achievable: X%.`
+3. **不要** 在 ## Project Gotchas 里写 [BuildFail]（文件是能编译的！）
+4. **不要** 把 [MaxCov] 和 [BuildFail] 同时写 —— 两者互斥

@@ -31,12 +31,18 @@ Read `TODO.md`. Format: directory sections with bullet entries:
 - `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` → actionable
 
-Collect all `- [ ]` entries. Exclude files recorded as `[BuildFail]` in `UT_RULES.md ## Project Gotchas`. Do NOT exclude any other files — every file must be attempted.
+Collect all `- [ ]` entries. Exclude files that match ANY of the following in UT_RULES.md:
+- Recorded as `[BuildFail]` in `## Project Gotchas`
+- Recorded as `[NoCode]` in `## Project Gotchas`
+- Recorded as `[DeclOnly]` in `## Project Gotchas`
+- Listed in `## Max Coverage Files` (已达到文档记录的覆盖率上限)
+
+Do NOT exclude any other files — every file must be attempted.
 
 Apply `current_focus` filter if set.
 
 **Terminal check — exit if**:
-- No `- [ ]` entries remain (all files are `- [x]` at ≥90%, or noted as BuildFail in UT_RULES.md) → Exit: All Done
+- No `- [ ]` entries remain (all files are `- [x]` at ≥90%, or excluded via [BuildFail]/[NoCode]/[DeclOnly] in UT_RULES.md ## Project Gotchas, or listed in ## Max Coverage Files) → Exit: All Done
 
 **B. Score and Select Batch**
 
@@ -109,6 +115,19 @@ Increment `batch_number`, add to `total_files_processed`.
 - If any file had an unrecoverable build failure, record it in `UT_RULES.md ## Project Gotchas` as:
   `- [BuildFail] FileName.cc — <error summary>` (do NOT mark TODO.md, it gets overwritten by coverage.sh)
 
+**[BuildFail] 严格定义：仅当以下 ALL 条件成立时才可添加：**
+- ✓ 实际执行了 `bash run_tests.sh`（或等效 cmake 命令）
+- ✓ 返回非零退出码（编译器/链接器错误，非运行时崩溃）
+- ✓ 已尝试 3 种不同的修复策略（含 prebuilt .a + `--unresolved-symbols=ignore-all`）
+- ✗ 运行时崩溃 ≠ [BuildFail]
+- ✗ 覆盖率低 ≠ [BuildFail]（用 [MaxCov] 代替）
+- ✗ 仅读代码推断可能失败 ≠ [BuildFail]
+
+**文件分类规则（替代 [BuildFail] 的正确标签）：**
+- 无可执行代码（注释掉/空类/纯 enum/纯宏）→ `[NoCode] FileName — reason`
+- 仅声明的 .hh（无 inline 方法体）→ `[DeclOnly] FileName.hh — declaration-only header`
+- 文件能编译但覆盖率达上限 → 移至 `## Max Coverage Files`，不写 [BuildFail]
+
 **G. No pause — go to next iteration immediately.**
 
 ---
@@ -117,7 +136,7 @@ Increment `batch_number`, add to `total_files_processed`.
 
 | Condition | Exit Message |
 |-----------|-------------|
-| All `- [ ]` entries gone (files reached ≥90% or are recorded as `[BuildFail]` in UT_RULES.md) | "All Done" report |
+| All `- [ ]` entries gone (files reached ≥90%, or excluded via [BuildFail]/[NoCode]/[DeclOnly] in UT_RULES.md ## Project Gotchas, or listed in ## Max Coverage Files) | "All Done" report |
 
 ## Exit Report
 
@@ -127,11 +146,14 @@ Increment `batch_number`, add to `total_files_processed`.
 ## Auto Complete
 
 Processed <N> batches, <M> total files.
-All files are now at >90% coverage (or recorded as [BuildFail] in UT_RULES.md).
+All files are now at >90% coverage (or documented in UT_RULES.md as excluded).
 
 Final coverage:
 - At >90%: X files
-- [BuildFail] (see UT_RULES.md ## Project Gotchas): W files
+- [BuildFail] (compilation fails — see UT_RULES.md ## Project Gotchas): W files
+- [NoCode] (no executable code — see UT_RULES.md ## Project Gotchas): V files
+- [DeclOnly] (declaration-only headers — see UT_RULES.md ## Project Gotchas): U files
+- [MaxCov] (at coverage ceiling — see UT_RULES.md ## Max Coverage Files): T files
 
 Run /ut-pilot:status for a full breakdown.
 ```

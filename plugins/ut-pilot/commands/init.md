@@ -448,6 +448,12 @@ cd ..
 lcov --add-tracefile coverage_baseline.info \
      --add-tracefile coverage_test.info \
      --output-file coverage_merged.info
+# IMPORTANT: Adjust the extract pattern to match your project's source layout.
+# Common patterns:
+#   "*/${MODULE}/source/*"   → source files under a dedicated "source/" subdirectory
+#   "*/${MODULE}/*"          → source files directly under the module directory
+#   "*/src/${MODULE}/*"      → projects with a top-level "src/" prefix
+# Wrong pattern = coverage_filtered.info is empty = all coverage shows as 0%.
 lcov --extract coverage_merged.info "*/${MODULE}/source/*" --output-file coverage_filtered.info
 
 # HTML report
@@ -562,12 +568,14 @@ mapfile -t SORTED_DIRS < <(printf '%s\n' "${!DIRS[@]}" | sort)
         continue
       fi
       if [ "$total" -eq 0 ]; then
-        # Headers with no executable code (declarations only) — skip silently.
+        # Headers with no executable code — handle based on status label.
         if [[ "$fname" == *.hh || "$fname" == *.h ]]; then
-          # But show [DeclOnly] headers — they are testable (instantiation tests)
           if [[ "$status_label" == *"[DeclOnly]"* ]]; then
-            echo "- [ ] ${fname} (0%, ? uncov — ${status_label})"
+            # [DeclOnly] with total=0 means pure declarations — no inline bodies,
+            # gcov has nothing to instrument. Mark as n/a (not "needs tests").
+            echo "- [x] ${fname} (n/a — ${status_label})"
           fi
+          # Plain headers with no label and no data: skip silently.
           continue
         fi
         if [ -n "$status_label" ]; then

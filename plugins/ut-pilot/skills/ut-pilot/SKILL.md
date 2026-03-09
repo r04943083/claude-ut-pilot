@@ -293,6 +293,18 @@ ut_add_simple_test(
 )
 ```
 
+**Coverage strategy for implementation files**: Always provide `COVERAGE_SOURCES` pointing
+to the `.cc` file under test. Without `COVERAGE_SOURCES`, the test will exercise the code
+through the prebuilt `.a` (no instrumentation → 0% coverage for that file). Example:
+
+```cmake
+ut_add_simple_test(
+  NAME MyClass_ut
+  SOURCES MyClass_ut.cc
+  COVERAGE_SOURCES ${SRC_ROOT}/path/to/MyClass.cc   # ← required for real coverage
+)
+```
+
 Priority: always use `ut_add_simple_test` if defined. Fall back to `ut_add_test`
 or manual patterns only if the aggregator target is not set up.
 
@@ -330,6 +342,8 @@ For each file you wrote tests for: verify >90% line coverage. If below:
 | `cannot instantiate abstract class` | Class has pure virtual methods | Create a minimal concrete subclass in the test file for testing |
 | Test links but coverage is 0% | Coverage instrumentation not enabled at build time | Ensure test was built with `ENABLE_COVERAGE=ON` |
 | `#include "X.h"` not found | Header outside source_root | Search under `project` path: `find <project> -name "X.h"` |
+| Test hangs indefinitely / parent waits forever | `EXPECT_EXIT` forks a child process; the child code uses OpenMP or another threading library internally — the child's thread pool is absent after fork, causing it to deadlock on any parallel section | **Do NOT use `EXPECT_EXIT` for code that uses OpenMP or fork-unsafe threading.** If the code calls `exit()` on failure AND uses OpenMP, these paths are fundamentally uncoverable via `EXPECT_EXIT`. Document as `[MaxCov]` with the reason: "calls exit() on divergence; EXPECT_EXIT incompatible with OpenMP fork-safety." |
+| Test binary exits with code 1 unexpectedly | Code path calls `exit(1)` directly (e.g., numerical divergence, fatal initialization failure). This terminates the entire test binary, failing all subsequent tests. | Wrap in `EXPECT_EXIT` ONLY if OpenMP/threading is not involved. Otherwise, avoid triggering the divergence path (constrain test inputs so the path is not reached), and document remaining uncovered lines as `[MaxCov]`. |
 
 ---
 
@@ -362,16 +376,24 @@ This pattern enables:
 
 ---
 
-## Header Resolution Principle
+## Source Compilation Principle
 
-If the project's main build succeeds, every `#include` in the source tree resolves to a real
-file. When an agent cannot find a header:
+**If the project's main build succeeds, all source files under `project` root can be
+compiled in the UT build environment using the same include paths.**
 
-1. Do NOT mark the file as [BuildFail] due to a missing header
-2. Search under the `project` path from UT_RULES.md
-3. Use: `find <project> -name "HeaderName.h" -type f`
-4. If multiple matches, check the source file's include context to pick the right one
-5. Add the header's directory to `target_include_directories` in CMakeLists.txt
+This has two corollaries:
+
+1. **Every `#include` is resolvable** — When an agent cannot find a header:
+   - Do NOT mark the file as [BuildFail]
+   - Search under the `project` path: `find <project> -name "HeaderName.h" -type f`
+   - Add the header's directory to `target_include_directories`
+
+2. **Every `.cc` file can be recompiled from source** — Prefer compiling source files
+   directly over the prebuilt library strategy. Prebuilt = 0% coverage; source = real data.
+   Only use prebuilt when an external SDK or binary-only component is genuinely unavailable.
+
+**Do NOT give up on a file because it seems hard to compile.** Read the error, find the
+missing include or symbol, add it. The project already proves the code compiles.
 
 ---
 
@@ -483,13 +505,15 @@ TODO.md is organized as directory sections. Entry formats:
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` — no instrumented lines captured yet
 - `- [x] Qux.cc (n/a — **[NoCode]** pure enum definitions)` — no executable code, nothing to cover
 - `- [ ] Big.cc (29%, 512 uncov — **[MaxCov 29%]** reason)` — at coverage ceiling, excluded
-- `- [ ] Hdr.hh (0%, ? uncov — **[DeclOnly]** reason)` — testable with instantiation tests
+- `- [x] Hdr.hh (n/a — **[DeclOnly]** reason)` — pure declarations, no inline bodies, gcov has nothing to instrument
+- `- [ ] Hdr.hh (45%, 12 uncov — **[DeclOnly]** reason)` — has inline bodies, coverable (total>0 from gcov)
 
 The uncovered line count is the primary input for **complex-first** scoring.
 
-Note: `.hh`/`.h` files with no executable code and no status label are silently omitted
-from TODO.md. `[DeclOnly]` headers are shown because they are testable (instantiation tests).
-`[NoCode]` `.cc` files are marked `[x]` with `n/a` since they have nothing to cover.
+Note: `.hh`/`.h` files with no label and no data are silently omitted from TODO.md.
+`[DeclOnly]` headers with `total=0` (no inline bodies) are marked `[x] n/a` — gcov has nothing to instrument.
+`[DeclOnly]` headers with `total>0` (has inline bodies) are shown as `[ ]` and ARE coverable.
+`[NoCode]` `.cc` files are marked `[x] n/a`.
 
 ### Regenerate coverage + TODO.md
 ```bash
@@ -573,25 +597,138 @@ TEST(FileReaderTest, ReadsCorrectly) {
 }
 ```
 
-### Classes with deep system dependencies (DB / full context)
+### Classes with cross-module or singleton dependencies
 
-If the constructor requires a database or system-context object, use this escalation order:
+When a file calls into a singleton or context object from another module, that module's
+source is also under `project` root — it is NOT an unavailable external dependency.
 
-1. **Search existing fixtures first**: Look in `_ut.cc` files in the same module directory for
-   MinimalWrapper / test-fixture classes that already set up the required dependency. Reuse them.
-2. **Write a minimal stub**: If no fixture exists, write a minimal concrete subclass or struct
-   that satisfies the required interface with no-op or hardcoded values.
-3. **Test pure-logic methods standalone**: Static methods, pure-math utilities, enum accessors,
-   and config getters do not need system context — test those first.
-4. **Use prebuilt libraries**: If the source file cannot be recompiled from scratch (missing
-   system headers, mandatory external SDK, broken transitive include chain), link against the
-   project's prebuilt static libraries instead. See "Prebuilt Library Strategy" below.
+**Escalation order (try each in sequence; stop when ≥90% coverage is reached):**
 
-### Prebuilt Library Strategy
+1. **Search existing fixtures first**: Look in `_ut.cc` files in the same module directory
+   for MinimalWrapper / test-fixture classes that already set up the required context.
+   Reuse them to avoid duplicating setup logic.
 
-When a `.cc` file's include chain requires an external SDK or system component that is not
-available in the test build environment, link against prebuilt static libraries instead of
-recompiling from source:
+2. **Write a singleton stub** (Singleton Stub Pattern — see below): If the class calls
+   `AnotherModule::getInst().someMethod()`, create a stub that overrides `getInst()` and
+   `someMethod()` with lightweight no-op or hardcoded implementations. Use
+   `--allow-multiple-definition` so the stub wins over the prebuilt `.a` version.
+
+3. **Compile the dependency from source**: If stubbing is insufficient, add the dependency's
+   `.cc` files to `COVERAGE_SOURCES` or `target_sources` — they compile cleanly since the
+   project proves they do. This gives real coverage for the dependency too.
+
+4. **Test pure-logic methods standalone**: Static methods, pure-math utilities, enum
+   accessors, and config getters do not need system context — test those first to achieve
+   partial coverage before tackling context-dependent paths.
+
+5. **Prebuilt library** (LAST RESORT — yields 0% coverage): Only when the dependency
+   requires a binary-only external SDK that truly cannot be compiled in the test environment.
+   See "Prebuilt Library Strategy" below.
+
+**Key insight**: Cross-module singletons, database wrappers, and context managers are
+ordinary C++ classes with source under `project`. They are NOT unresolvable system deps.
+Always try stubs or source compilation before reaching for prebuilt libraries.
+
+### Singleton Stub Pattern
+
+When the file under test calls a singleton that requires full system initialization,
+create a stub file that provides lightweight override implementations.
+
+**Structure** (`<test_root>/<module>/stubs/Singleton_stub.cc`):
+```cpp
+// Provides lightweight overrides for SomeSingleton methods called by the code under test.
+// The --allow-multiple-definition linker flag lets this override the prebuilt .a version.
+#include "SomeSingleton.hh"
+
+namespace project {
+
+SomeSingleton* SomeSingleton::_s_instance = nullptr;
+
+SomeSingleton& SomeSingleton::getInst() {
+  if (!_s_instance) _s_instance = new SomeSingleton();
+  return *_s_instance;
+}
+
+void SomeSingleton::destroyInst() {
+  delete _s_instance;
+  _s_instance = nullptr;
+}
+
+// Override only the methods called by the file under test.
+// Return values chosen so the test can reach the branches you want to cover.
+bool SomeSingleton::doOperation(Item* /*item*/) { return true; }
+double SomeSingleton::queryValue(int /*id*/) { return 0.0; }
+
+}  // namespace project
+```
+
+**CMake integration** (with aggregator target):
+```cmake
+ut_add_simple_test(
+  NAME MyFile_ut
+  SOURCES MyFile_ut.cc
+  COVERAGE_SOURCES ${SRC_ROOT}/path/to/MyFile.cc
+)
+# Add stub — overrides singleton methods from the prebuilt .a
+target_sources(MyFile_ut PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs/Singleton_stub.cc
+)
+```
+
+The `--allow-multiple-definition` flag in the aggregator target ensures the stub's
+symbol definitions take precedence over the prebuilt `.a` versions.
+
+**Choosing stub return values**: To cover both branches of `if (singleton.doOp())`,
+you may need two test targets with different stub behaviors — or use a global flag:
+```cpp
+static bool g_stub_result = true;
+bool SomeSingleton::doOperation(Item*) { return g_stub_result; }
+```
+Then set `g_stub_result = false` in a test before the call.
+
+**TearDown**: Always call `SomeSingleton::destroyInst()` in fixture `TearDown()` to
+prevent singleton state from leaking between tests.
+
+### Fixture segfault: trace the initialization chain
+
+When a test segfaults with a null-pointer dereference, **do not assume the file is
+system-dependent or [BuildFail]**. Segfaults in fixtures almost always mean a missing
+initialization step in `SetUp()`.
+
+**Debugging process:**
+1. Identify the null pointer from the crash address or ASAN output
+2. Find what field was null (e.g., `_manager` in `obj->_manager->method()`)
+3. Search the source for the method that populates `_manager` (e.g., `initManager()`)
+4. Check if `SetUp()` calls that initialization — if not, add it
+
+```cpp
+void SetUp() override {
+  obj.initContextA();       // REQUIRED: populates _context
+  obj.initManager();        // REQUIRED: populates _manager (was missing, caused segfault)
+  // Now obj.runOperation() no longer crashes
+}
+void TearDown() override {
+  obj.destroyManager();
+  obj.destroyContextA();    // Reverse order
+}
+```
+
+**Key principle**: Read the source file's own initialization sequence (its constructor
+or `init*()` methods) to discover which sub-initializations are required. The project's
+integration tests or main entry point often show the correct sequence.
+
+### Prebuilt Library Strategy (Last Resort)
+
+**Use this ONLY when source recompilation is genuinely impossible** — for example, when
+the dependency requires a binary-only external SDK, a system service (OS-level daemon,
+hardware driver), or a component whose source is not available under `project` root.
+
+For all dependencies whose source IS under `project` root (which is almost always the
+case for same-project modules), prefer the Singleton Stub Pattern or direct source
+compilation — both give real coverage data. The prebuilt strategy yields 0% coverage
+for the linked file.
+
+When source recompilation is truly impossible, link against prebuilt static libraries:
 
 ```cmake
 # Step 1: Create a module target that wraps the prebuilt .a (no recompilation of sources).
@@ -621,9 +758,9 @@ ut_add_test(
 ```
 
 **Trade-off**: Prebuilt binaries are not instrumented, so the file's coverage will be 0%.
-This is acceptable when the goal is to verify that the test builds and exercises the public
-interface. Record the result as `[MaxCov 0%]` in `UT_RULES.md ## Max Coverage Files`.
-If source compilation is feasible, always prefer `SOURCES file.cc` to get real coverage.
+This is a fallback only — if source compilation becomes feasible later, switch to
+`COVERAGE_SOURCES` to get real coverage. Record as `[MaxCov 0%]` in
+`UT_RULES.md ## Max Coverage Files` only after confirming source compilation is impossible.
 
 **With an aggregator target**: Prebuilt library linking is handled automatically by the
 aggregator's `target_link_libraries`. No per-test `--unresolved-symbols=ignore-all` is needed.

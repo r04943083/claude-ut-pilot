@@ -21,6 +21,21 @@ This file is referenced by agents spawned during parallel test writing.
 
 ---
 
+## Source Root Policy
+
+`source_root` is a **read-only reference path**. Agents use it to locate and read source
+files, resolve `#include` paths, and enumerate coverage targets. **Never write any files
+into `source_root`.**
+
+All generated artifacts belong under `test_root`:
+- `UT_RULES.md`, `TODO.md` — test_root root
+- `CMakeLists.txt`, `run_tests.sh`, `coverage.sh`, `gen_todo.sh` — test_root root
+- `cmake/UTHelpers.cmake`, `module_config.cmake` — test_root root
+- `build/`, `build_cov/`, `coverage_report/` — test_root subdirectories
+- Test source files (`*_ut.cc`) — test_root mirroring source tree structure
+
+---
+
 ## File Classification
 
 **Classify every file before writing tests.** This prevents incorrect [BuildFail] labels
@@ -120,6 +135,10 @@ For all files, identify:
 - **Logging**: does it use `LOG_*`, spdlog, printf? (affects link dependencies)
 - **Templates**: are there template specializations to test?
 - **Static/free functions** in `.cc` files (need tests too)
+
+**Tip**: The `clangd-lsp` plugin (if enabled) provides powerful code intelligence for C/C++
+files. When dealing with complex code (deep inheritance, heavy template usage, large files
+with many symbols), prefer LSP operations over manual code reading:
 
 If LSP is available:
 - Use `document_symbols` to list all class methods without parsing headers manually
@@ -462,13 +481,15 @@ TODO.md is organized as directory sections. Entry formats:
 - `- [x] Foo.cc (94% - covered)` — at ≥90%, skip
 - `- [ ] Bar.cc (0%, 617 uncov - needs tests)` — below 90%, has uncovered line count
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` — no instrumented lines captured yet
-- `- [ ] Qux.cc (0%, 49 uncov — **[NoCode]** pure enum definitions)` — classified, excluded
+- `- [x] Qux.cc (n/a — **[NoCode]** pure enum definitions)` — no executable code, nothing to cover
 - `- [ ] Big.cc (29%, 512 uncov — **[MaxCov 29%]** reason)` — at coverage ceiling, excluded
+- `- [ ] Hdr.hh (0%, ? uncov — **[DeclOnly]** reason)` — testable with instantiation tests
 
 The uncovered line count is the primary input for **complex-first** scoring.
 
-Note: `.hh`/`.h` files with no executable code (pure declarations) are silently omitted
-from TODO.md. Only `.cc` files appear with the "0%, ? uncov" entry when they lack coverage data.
+Note: `.hh`/`.h` files with no executable code and no status label are silently omitted
+from TODO.md. `[DeclOnly]` headers are shown because they are testable (instantiation tests).
+`[NoCode]` `.cc` files are marked `[x]` with `n/a` since they have nothing to cover.
 
 ### Regenerate coverage + TODO.md
 ```bash

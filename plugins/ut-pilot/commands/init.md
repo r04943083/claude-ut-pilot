@@ -21,6 +21,9 @@ Scan the project silently (no output yet). Detect:
 8. **Prebuilt libraries**: Look for `build/lib/`, `build/release/lib/`, `install/lib/` for `.a` files. Count how many exist.
 9. **Include complexity**: Count distinct `target_include_directories` or `-I` entries across existing CMakeLists.txt. If >10 unique dirs, flag as "complex include tree".
 
+**Important**: `source_root` is read-only — no files will be written there. All infrastructure
+and generated files go under `test_root`.
+
 Also check if `UT_RULES.md` already exists (re-init scenario).
 
 ## Step 2: Confirm Configuration
@@ -436,41 +439,14 @@ lcov --capture --directory .. --output-file ../coverage_test.info
 rm -f *.gcov
 cd ..
 
-# Step 3: Generate synthetic zero tracefile for source files with no coverage data
+# Step 3: Merge tracefiles (baseline + test)
 #
-# WHY only .cc files?
-#   Header files (.hh/.h) with inline code are compiled as part of the
-#   translation units that #include them.  gcov/lcov automatically generates
-#   DA entries for their executable lines in coverage_test.info — no synthetic
-#   data needed.
-#
-#   Header files that contain ONLY declarations have ZERO executable lines.
-#   Generating synthetic DA:linenum,0 for every line would fake-inflate
-#   uncovered counts and misleadingly report 0% for files with nothing to cover.
-#
-#   .cc files that are not compiled under coverage genuinely need the 0%
-#   signal so developers know they lack test coverage.
-coverage_zero="coverage_zero.info"
-> "$coverage_zero"
-covered_files=$(grep '^SF:' coverage_test.info 2>/dev/null | sed 's/^SF://' | sort -u)
-while IFS= read -r -d '' src_file; do
-  if echo "$covered_files" | grep -qxF "$src_file"; then continue; fi
-  echo "TN:" >> "$coverage_zero"
-  echo "SF:${src_file}" >> "$coverage_zero"
-  line_num=0
-  while IFS= read -r _line; do
-    line_num=$((line_num + 1))
-    echo "DA:${line_num},0" >> "$coverage_zero"
-  done < "$src_file"
-  echo "LF:${line_num}" >> "$coverage_zero"
-  echo "LH:0" >> "$coverage_zero"
-  echo "end_of_record" >> "$coverage_zero"
-done < <(find "$SOURCE_ROOT" -type f -name '*.cc' -print0 | sort -z)
-
-# Step 4: merge + extract
+# No synthetic zero tracefile — files not compiled under coverage are tracked
+# via filesystem scan in gen_todo.sh (shown as "? uncov"). Synthetic DA entries
+# counted every text line (comments, blanks, copyright headers) as "uncovered",
+# producing inflated and misleading uncovered-line counts.
 lcov --add-tracefile coverage_baseline.info \
      --add-tracefile coverage_test.info \
-     --add-tracefile coverage_zero.info \
      --output-file coverage_merged.info
 lcov --extract coverage_merged.info "*/${MODULE}/source/*" --output-file coverage_filtered.info
 
@@ -575,11 +551,26 @@ mapfile -t SORTED_DIRS < <(printf '%s\n' "${!DIRS[@]}" | sort)
       fname="$(basename "$f")"
       total="${COV_TOTAL[$f]:-0}"; hit="${COV_HIT[$f]:-0}"
       status_label="${FILE_STATUS_LABEL[$fname]:-}"
+      # [NoCode] files have nothing to cover — always mark as done
+      if [[ "$status_label" == *"[NoCode]"* ]]; then
+        echo "- [x] ${fname} (n/a — ${status_label})"
+        continue
+      fi
+      # [BuildFail] files cannot be compiled — ignore stale coverage data
+      if [[ "$status_label" == *"[BuildFail]"* ]]; then
+        echo "- [ ] ${fname} (0%, ? uncov — ${status_label})"
+        continue
+      fi
       if [ "$total" -eq 0 ]; then
         # Headers with no executable code (declarations only) — skip silently.
         if [[ "$fname" == *.hh || "$fname" == *.h ]]; then
+          # But show [DeclOnly] headers — they are testable (instantiation tests)
+          if [[ "$status_label" == *"[DeclOnly]"* ]]; then
+            echo "- [ ] ${fname} (0%, ? uncov — ${status_label})"
+          fi
           continue
-        elif [ -n "$status_label" ]; then
+        fi
+        if [ -n "$status_label" ]; then
           echo "- [ ] ${fname} (0%, ? uncov — ${status_label})"
         else
           echo "- [ ] ${fname} (0%, ? uncov - no tests)"

@@ -73,6 +73,7 @@ Each agent receives only paths and instructions — the agent reads files itself
 Assigned files: [list of source file paths]
 Test root: <test_root>
 Source root: <source_root>
+Source root is READ-ONLY — do not write any files there. All output goes to test_root.
 Project root: <project>
 UT_RULES.md path: <path to UT_RULES.md>
 Test directory (for CMake patterns): <test_root>/<module>/
@@ -103,6 +104,7 @@ Your task:
 9. If you discover a gotcha or useful fixture pattern, append to UT_RULES.md ## Project Gotchas.
    Do NOT add entries to ## Max Coverage Files unless a file genuinely cannot exceed the
    documented ceiling after exhausting all strategies.
+10. NEVER write files into source_root. All test files, cmake changes, and artifacts go under test_root.
 Report: files created/modified and expected coverage level.
 ```
 

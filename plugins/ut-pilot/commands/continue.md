@@ -31,10 +31,12 @@ Read `TODO.md` from test_root. Format: directory sections with bullet entries:
 - `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` → no coverage data yet
 
-If `TODO.md` does not exist or is older than 1 hour, run:
-```bash
-cd <test_root> && bash coverage.sh
-```
+If `TODO.md` does not exist or is older than 1 hour:
+- If `<test_root>/build_cov/coverage_filtered.info` exists:
+  → run `cd <test_root> && bash gen_todo.sh <MODULE> <SOURCE_ROOT>` (fast, seconds — re-parses existing coverage data)
+- If `coverage_filtered.info` does not exist:
+  → run `cd <test_root> && bash coverage.sh` (full rebuild, minutes)
+
 Then re-read the generated `TODO.md`.
 
 Collect all `- [ ]` entries as the uncovered file list.
@@ -45,6 +47,8 @@ Exclude files matching ANY of the following in `UT_RULES.md`:
 - Recorded as `[BuildFail]` in `## Project Gotchas`
 - Recorded as `[NoCode]` in `## Project Gotchas`
 - Listed in `## Max Coverage Files` (already at documented coverage ceiling)
+
+Do NOT exclude `[DeclOnly]` files — these are testable (write instantiation tests).
 
 Do NOT exclude any other files — every remaining file must be attempted.
 
@@ -142,7 +146,7 @@ If build fails:
 
 ### 6b. Update Coverage
 ```bash
-cd <test_root> && bash coverage.sh
+cd <test_root> && bash coverage.sh   # full rebuild — required here to capture new test results
 ```
 
 This regenerates `TODO.md` with updated percentages.

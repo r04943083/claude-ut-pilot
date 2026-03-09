@@ -33,10 +33,18 @@ Read `TODO.md`. Format: directory sections with bullet entries:
 - `- [ ] Bar.cc (0%, 617 uncov - needs tests)` → actionable
 - `- [ ] Baz.cc (0%, ? uncov - no tests)` → actionable
 
+If `TODO.md` does not exist or is stale:
+- If `<test_root>/build_cov/coverage_filtered.info` exists:
+  → run `cd <test_root> && bash gen_todo.sh <MODULE> <SOURCE_ROOT>` (fast, seconds)
+- If `coverage_filtered.info` does not exist:
+  → run `cd <test_root> && bash coverage.sh` (full rebuild, minutes)
+
 Collect all `- [ ]` entries. Exclude files matching ANY of the following in `UT_RULES.md`:
 - Recorded as `[BuildFail]` in `## Project Gotchas`
 - Recorded as `[NoCode]` in `## Project Gotchas`
 - Listed in `## Max Coverage Files` (already at documented coverage ceiling)
+
+Do NOT exclude `[DeclOnly]` files — these are testable (write instantiation tests).
 
 Do NOT exclude any other files — every remaining file must be attempted.
 

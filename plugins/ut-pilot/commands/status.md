@@ -19,7 +19,12 @@ Parse:
 
 Check if `TODO.md` exists in `test_root`:
 - If it exists: read it directly
-- If it doesn't exist: run `cd <test_root> && bash coverage.sh` to generate it, then read
+- If it doesn't exist:
+  - If `<test_root>/build_cov/coverage_filtered.info` exists:
+    → run `cd <test_root> && bash gen_todo.sh <MODULE> <SOURCE_ROOT>` (fast, seconds)
+  - If `coverage_filtered.info` does not exist:
+    → run `cd <test_root> && bash coverage.sh` (full rebuild, minutes)
+  Then read
 
 Parse `TODO.md`. Format: directory sections with bullet entries:
 - `- [x] Foo.cc (94% - covered)` → covered
@@ -59,6 +64,7 @@ Run /ut-pilot:path with no args to return to global mode.
 | Need tests           | Y         |
 | [BuildFail]          | W         |
 | [NoCode]             | V         |
+| [DeclOnly]           | U  (testable — instantiation tests) |
 | [MaxCov]             | T         |
 ```
 

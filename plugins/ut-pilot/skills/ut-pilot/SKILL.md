@@ -61,7 +61,9 @@ TEST(ClassNameTest, FieldAccess) {
   EXPECT_EQ(obj.field_, value);
 }
 ```
-Do **not** record in `## Project Gotchas` — these files are normal test targets.
+Record in `## Project Gotchas` as `- [DeclOnly] FileName.hh — reason`.
+This documents why the file has no coverage data. `[DeclOnly]` files are NOT excluded
+from the continue/auto loop — agents should write instantiation tests for them.
 
 ### [BuildFail] — Compilation Fails
 
@@ -354,6 +356,16 @@ file. When an agent cannot find a header:
 
 ---
 
+## Dual Build Modes
+
+- **Fast mode** (`run_tests.sh`): Links prebuilt `.a` via IMPORTED targets. No instrumentation.
+  Build in seconds. Use for rapid iteration.
+- **Coverage mode** (`coverage.sh`): Passes `-DENABLE_COVERAGE=ON`. `ut_add_module_sources`
+  compiles from source as OBJECT libraries with gcov flags. `ut_add_simple_test` creates
+  per-test `_cov` OBJECT libraries for targeted instrumentation. Build in minutes.
+
+---
+
 ## Build System Simplification
 
 ### When to Use an Aggregator Target
@@ -455,11 +467,24 @@ TODO.md is organized as directory sections. Entry formats:
 
 The uncovered line count is the primary input for **complex-first** scoring.
 
+Note: `.hh`/`.h` files with no executable code (pure declarations) are silently omitted
+from TODO.md. Only `.cc` files appear with the "0%, ? uncov" entry when they lack coverage data.
+
 ### Regenerate coverage + TODO.md
 ```bash
 cd <test_root> && bash coverage.sh       # build, run tests, generate coverage_filtered.info + TODO.md
 cd <test_root> && bash gen_todo.sh       # re-parse existing coverage data only (faster)
 ```
+
+### When to use which script
+
+| Script | Cost | When to use |
+|--------|------|-------------|
+| `coverage.sh` | Minutes (full rebuild) | After writing new tests or changing source code |
+| `gen_todo.sh <MODULE> <SOURCE_ROOT>` | Seconds (re-parse) | Refresh TODO.md from existing coverage data (e.g., after updating UT_RULES.md labels) |
+| `run_tests.sh` | Seconds (fast build) | Quick build-and-test iteration without coverage |
+
+Note: `coverage.sh` calls `gen_todo.sh` at the end — no need to run both.
 
 ### Check a specific file's coverage
 ```bash
@@ -471,6 +496,11 @@ Open `<test_root>/coverage_report/<path>/FileName.cc.gcov.html` in a browser, or
 ```bash
 gcov -b -c FileName.cc  # shows branch coverage in the terminal
 ```
+
+### genhtml --prefix
+
+Use `genhtml --prefix <SOURCE_ROOT>` to strip the source root path, producing a report
+directory that mirrors the source tree structure for easy navigation.
 
 ---
 

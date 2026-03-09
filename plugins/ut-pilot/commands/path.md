@@ -55,7 +55,7 @@ Use exact line replacement — find the line starting with `- current_focus:` an
 First, ensure TODO.md is up to date:
 - If `<test_root>/build_cov/coverage_filtered.info` exists, run:
   ```bash
-  cd <test_root> && bash gen_todo.sh
+  cd <test_root> && bash gen_todo.sh <MODULE> <SOURCE_ROOT>
   ```
   to regenerate TODO.md from the latest coverage data.
 - If coverage data does not exist yet, note this in the report (suggest running `/ut-pilot:init` first).

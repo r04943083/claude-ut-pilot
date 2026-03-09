@@ -199,26 +199,111 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/module_config.cmake)
 # Reusable UT helper macros
 # Backward-compatible macros
 macro(ut_add_module_sources)
-  cmake_parse_arguments(ARG "" "NAME" "SOURCES;INCLUDES;LIBS;PREBUILT_LIB" ${ARGN})
-  if(ARG_SOURCES AND NOT "${ARG_SOURCES}" STREQUAL "")
-    add_library(${ARG_NAME} OBJECT ${ARG_SOURCES})
-    if(ARG_INCLUDES)
-      target_include_directories(${ARG_NAME} PRIVATE ${ARG_INCLUDES})
+  cmake_parse_arguments(UMS "" "NAME;PREBUILT_LIB" "SOURCES;INCLUDES;LIBS" ${ARGN})
+
+  if(NOT UMS_NAME)
+    message(FATAL_ERROR "ut_add_module_sources: NAME is required")
+  endif()
+
+  set(_use_object OFF)
+
+  if(ENABLE_COVERAGE)
+    set(_use_object ON)
+  else()
+    if(UMS_PREBUILT_LIB AND EXISTS "${UMS_PREBUILT_LIB}")
+      add_library(${UMS_NAME} STATIC IMPORTED)
+      set_target_properties(${UMS_NAME} PROPERTIES
+        IMPORTED_LOCATION "${UMS_PREBUILT_LIB}"
+      )
+      if(UMS_INCLUDES)
+        set_target_properties(${UMS_NAME} PROPERTIES
+          INTERFACE_INCLUDE_DIRECTORIES "${UMS_INCLUDES}"
+        )
+      endif()
+      if(UMS_LIBS)
+        set_target_properties(${UMS_NAME} PROPERTIES
+          INTERFACE_LINK_LIBRARIES "${UMS_LIBS}"
+        )
+      endif()
+    else()
+      if(UMS_PREBUILT_LIB)
+        message(WARNING "ut_add_module_sources(${UMS_NAME}): pre-built lib '${UMS_PREBUILT_LIB}' not found, falling back to OBJECT library")
+      endif()
+      set(_use_object ON)
+    endif()
+  endif()
+
+  if(_use_object)
+    if(UMS_SOURCES)
+      add_library(${UMS_NAME} OBJECT ${UMS_SOURCES})
+      if(UMS_INCLUDES)
+        target_include_directories(${UMS_NAME} PRIVATE ${UMS_INCLUDES})
+      endif()
+      if(UMS_LIBS)
+        # OBJECT libraries can carry link dependencies via INTERFACE
+        target_link_libraries(${UMS_NAME} INTERFACE ${UMS_LIBS})
+      endif()
+    else()
+      # Header-only: create INTERFACE library
+      add_library(${UMS_NAME} INTERFACE)
+      if(UMS_INCLUDES)
+        target_include_directories(${UMS_NAME} INTERFACE ${UMS_INCLUDES})
+      endif()
     endif()
   endif()
 endmacro()
 
 macro(ut_add_test)
-  cmake_parse_arguments(ARG "" "NAME" "SOURCES;DEPENDS;INCLUDES;LIBS" ${ARGN})
-  add_executable(${ARG_NAME} ${ARG_SOURCES})
-  if(ARG_INCLUDES)
-    target_include_directories(${ARG_NAME} PRIVATE ${ARG_INCLUDES})
+  cmake_parse_arguments(UAT "" "NAME" "SOURCES;DEPENDS;INCLUDES;LIBS" ${ARGN})
+
+  if(NOT UAT_NAME)
+    message(FATAL_ERROR "ut_add_test: NAME is required")
   endif()
-  if(ARG_DEPENDS)
-    target_link_libraries(${ARG_NAME} PRIVATE ${ARG_DEPENDS})
+  if(NOT UAT_SOURCES)
+    message(FATAL_ERROR "ut_add_test(${UAT_NAME}): SOURCES is required")
   endif()
-  target_link_libraries(${ARG_NAME} PRIVATE GTest::gtest_main pthread ${ARG_LIBS})
-  add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+
+  # Collect object files from OBJECT library dependencies
+  set(_obj_sources "")
+  set(_link_deps "")
+  foreach(_dep ${UAT_DEPENDS})
+    if(TARGET ${_dep})
+      get_target_property(_dep_type ${_dep} TYPE)
+      if(_dep_type STREQUAL "OBJECT_LIBRARY")
+        list(APPEND _obj_sources $<TARGET_OBJECTS:${_dep}>)
+        # Pull in interface link libs from the object lib
+        get_target_property(_iface_libs ${_dep} INTERFACE_LINK_LIBRARIES)
+        if(_iface_libs)
+          list(APPEND _link_deps ${_iface_libs})
+        endif()
+      elseif(_dep_type STREQUAL "INTERFACE_LIBRARY")
+        list(APPEND _link_deps ${_dep})
+      else()
+        # STATIC, STATIC IMPORTED, etc. - link directly
+        list(APPEND _link_deps ${_dep})
+      endif()
+    else()
+      message(WARNING "ut_add_test(${UAT_NAME}): dependency '${_dep}' is not a target")
+    endif()
+  endforeach()
+
+  add_executable(${UAT_NAME} ${UAT_SOURCES} ${_obj_sources})
+
+  if(UAT_INCLUDES)
+    target_include_directories(${UAT_NAME} PRIVATE ${UAT_INCLUDES})
+  endif()
+
+  # Always link gtest and pthread
+  set(_all_libs GTest::gtest_main pthread)
+  if(_link_deps)
+    list(APPEND _all_libs ${_link_deps})
+  endif()
+  if(UAT_LIBS)
+    list(APPEND _all_libs ${UAT_LIBS})
+  endif()
+
+  target_link_libraries(${UAT_NAME} ${_all_libs})
+  add_test(NAME ${UAT_NAME} COMMAND ${UAT_NAME})
 endmacro()
 
 # Zero-config test macro using aggregator target
@@ -227,36 +312,40 @@ endmacro()
 #   ut_add_simple_test(NAME Foo_ut SOURCES Foo_ut.cc COVERAGE_SOURCES /path/to/Foo.cc)
 #   ut_add_simple_test(NAME Foo_ut SOURCES Foo_ut.cc COVERAGE_SOURCES /path/to/Foo.cc
 #                      COVERAGE_COMPILE_OPTIONS -fopenmp -include /path/to/header.hh)
-function(ut_add_simple_test)
-  cmake_parse_arguments(ARG "" "NAME" "SOURCES;COVERAGE_SOURCES;COVERAGE_COMPILE_OPTIONS" ${ARGN})
+macro(ut_add_simple_test)
+  cmake_parse_arguments(UAST "" "NAME" "SOURCES;COVERAGE_SOURCES;COVERAGE_COMPILE_OPTIONS" ${ARGN})
 
   # Coverage OBJECT library: recompile specific sources with instrumentation
-  set(_extra_objects "")
-  if(ENABLE_COVERAGE AND ARG_COVERAGE_SOURCES)
-    set(_cov_target ${ARG_NAME}_cov)
-    add_library(${_cov_target} OBJECT ${ARG_COVERAGE_SOURCES})
-    target_link_libraries(${_cov_target} PRIVATE ${PROJECT_UT_DEPS_TARGET})
-    target_compile_options(${_cov_target} PRIVATE -O0 -g --coverage -fprofile-arcs -ftest-coverage)
-    if(ARG_COVERAGE_COMPILE_OPTIONS)
-      target_compile_options(${_cov_target} PRIVATE ${ARG_COVERAGE_COMPILE_OPTIONS})
+  set(_uast_cov_objects "")
+  if(ENABLE_COVERAGE AND UAST_COVERAGE_SOURCES)
+    set(_uast_cov_lib ${UAST_NAME}_cov)
+    add_library(${_uast_cov_lib} OBJECT ${UAST_COVERAGE_SOURCES})
+    target_link_libraries(${_uast_cov_lib} PRIVATE ${PROJECT_UT_DEPS_TARGET})
+    target_compile_options(${_uast_cov_lib} PRIVATE -O0 -g --coverage -fprofile-arcs -ftest-coverage)
+    if(UAST_COVERAGE_COMPILE_OPTIONS)
+      target_compile_options(${_uast_cov_lib} PRIVATE ${UAST_COVERAGE_COMPILE_OPTIONS})
     endif()
-    set(_extra_objects $<TARGET_OBJECTS:${_cov_target}>)
+    set(_uast_cov_objects $<TARGET_OBJECTS:${_uast_cov_lib}>)
   endif()
 
-  add_executable(${ARG_NAME} ${ARG_SOURCES} ${_extra_objects})
-  target_link_libraries(${ARG_NAME} PRIVATE
+  add_executable(${UAST_NAME} ${UAST_SOURCES} ${_uast_cov_objects})
+  target_link_libraries(${UAST_NAME} PRIVATE
     ${PROJECT_UT_DEPS_TARGET}
     GTest::gtest_main
     pthread
   )
-  add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
-endfunction()
+  add_test(NAME ${UAST_NAME} COMMAND ${UAST_NAME})
+endmacro()
 ```
 
 **3. `module_config.cmake`** in test_root:
 ```cmake
 # Project-specific aggregator target for unit test dependencies
 # Edit this file to match your project's include directories and libraries.
+# For large projects, consider splitting into:
+#   module_config.cmake    — path variables and this INTERFACE target
+#   {module}_ut_targets.cmake — per-module OBJECT/IMPORTED targets
+# Then include both: include(module_config.cmake) + include({module}_ut_targets.cmake)
 
 set(PROJECT_UT_DEPS_TARGET <ModuleName>_ut_deps)
 add_library(${PROJECT_UT_DEPS_TARGET} INTERFACE)
@@ -294,11 +383,13 @@ Create the `cmake/` directory under test_root before writing `UTHelpers.cmake`.
 ```bash
 #!/bin/bash
 set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build"
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-cmake .. -DCMAKE_BUILD_TYPE=Debug
+cd "$(dirname "$0")"
+
+UT_MODULE="${1:-<ModuleName>}"
+shift 2>/dev/null || true
+
+mkdir -p build && cd build
+cmake .. -DUT_MODULE="${UT_MODULE}" "$@"
 make -j$(nproc)
 ctest --output-on-failure
 ```
@@ -307,12 +398,24 @@ ctest --output-on-failure
 ```bash
 #!/bin/bash
 set -e
+if ! command -v lcov &> /dev/null; then
+  echo "ERROR: lcov not found. Install with: apt-get install lcov"
+  exit 1
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build_cov"
 REPORT_DIR="$SCRIPT_DIR/coverage_report"
-# Set these for your project:
-SOURCE_ROOT="<source_root>"
-MODULE="<ModuleName>"
+UT_MODULE="${1:-<ModuleName>}"
+# Module-to-source-root mapping (add entries for each module)
+declare -A MODULE_SOURCE_ROOTS=(
+  [<ModuleName>]="<source_root>"
+)
+SOURCE_ROOT="${MODULE_SOURCE_ROOTS[$UT_MODULE]}"
+if [ -z "$SOURCE_ROOT" ]; then
+  echo "ERROR: No source root mapping for module '$UT_MODULE'."
+  exit 1
+fi
+MODULE="$UT_MODULE"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
@@ -321,12 +424,32 @@ make -j$(nproc)
 ctest --output-on-failure
 
 mkdir -p "$REPORT_DIR"
+# Run lcov from inside a dedicated gcov temp dir so .gcov intermediates
+# stay isolated and never litter the workspace root.
+mkdir -p gcov_tmp
+cd gcov_tmp
 # Step 1: baseline (zero for all instrumented lines)
-lcov --capture --initial --directory . --output-file coverage_baseline.info
+lcov --capture --initial --directory .. --output-file ../coverage_baseline.info
 # Step 2: actual execution counts
-lcov --capture --directory . --output-file coverage_test.info
+lcov --capture --directory .. --output-file ../coverage_test.info
+# Clean up gcov intermediates immediately after capture
+rm -f *.gcov
+cd ..
 
-# Step 3: zero-fill source files not compiled into any test binary
+# Step 3: Generate synthetic zero tracefile for source files with no coverage data
+#
+# WHY only .cc files?
+#   Header files (.hh/.h) with inline code are compiled as part of the
+#   translation units that #include them.  gcov/lcov automatically generates
+#   DA entries for their executable lines in coverage_test.info — no synthetic
+#   data needed.
+#
+#   Header files that contain ONLY declarations have ZERO executable lines.
+#   Generating synthetic DA:linenum,0 for every line would fake-inflate
+#   uncovered counts and misleadingly report 0% for files with nothing to cover.
+#
+#   .cc files that are not compiled under coverage genuinely need the 0%
+#   signal so developers know they lack test coverage.
 coverage_zero="coverage_zero.info"
 > "$coverage_zero"
 covered_files=$(grep '^SF:' coverage_test.info 2>/dev/null | sed 's/^SF://' | sort -u)
@@ -342,7 +465,7 @@ while IFS= read -r -d '' src_file; do
   echo "LF:${line_num}" >> "$coverage_zero"
   echo "LH:0" >> "$coverage_zero"
   echo "end_of_record" >> "$coverage_zero"
-done < <(find "$SOURCE_ROOT" -type f \( -name '*.hh' -o -name '*.h' -o -name '*.cc' \) -print0 | sort -z)
+done < <(find "$SOURCE_ROOT" -type f -name '*.cc' -print0 | sort -z)
 
 # Step 4: merge + extract
 lcov --add-tracefile coverage_baseline.info \
@@ -370,7 +493,20 @@ annotations from UT_RULES.md for classified files):
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODULE="${1:-MyModule}"
-SOURCE_ROOT="${2:-<source_root>}"
+# Module-to-source-root mapping (fallback if arg 2 not provided)
+declare -A MODULE_SOURCE_ROOTS=(
+  [<ModuleName>]="<source_root>"
+)
+
+if [ -n "$2" ]; then
+  SOURCE_ROOT="$2"
+else
+  SOURCE_ROOT="${MODULE_SOURCE_ROOTS[$MODULE]}"
+  if [ -z "$SOURCE_ROOT" ]; then
+    echo "ERROR: No source root mapping for module '$MODULE'. Provide as arg 2."
+    exit 1
+  fi
+fi
 COV_INFO="${SCRIPT_DIR}/build_cov/coverage_filtered.info"
 SOURCE_ROOT_REAL=$(realpath "$SOURCE_ROOT" 2>/dev/null || echo "$SOURCE_ROOT")
 OUTPUT="${SCRIPT_DIR}/TODO.md"
@@ -381,7 +517,7 @@ declare -A FILE_STATUS_LABEL  # basename -> annotation string
 if [ -f "$UT_RULES_FILE" ]; then
   # Scan entire file for [BuildFail], [NoCode] single-line gotcha entries
   while IFS= read -r line; do
-    if [[ "$line" =~ ^-[[:space:]]\[(BuildFail|NoCode)\][[:space:]]([[:alnum:]_.]+)[[:space:]]— ]]; then
+    if [[ "$line" =~ ^\-[[:space:]]\[(BuildFail|NoCode|DeclOnly)\][[:space:]]([[:alnum:]_.]+)[[:space:]]— ]]; then
       tag="${BASH_REMATCH[1]}"
       fname="${BASH_REMATCH[2]}"
       reason=$(echo "$line" | sed 's/.*— //')
@@ -440,7 +576,10 @@ mapfile -t SORTED_DIRS < <(printf '%s\n' "${!DIRS[@]}" | sort)
       total="${COV_TOTAL[$f]:-0}"; hit="${COV_HIT[$f]:-0}"
       status_label="${FILE_STATUS_LABEL[$fname]:-}"
       if [ "$total" -eq 0 ]; then
-        if [ -n "$status_label" ]; then
+        # Headers with no executable code (declarations only) — skip silently.
+        if [[ "$fname" == *.hh || "$fname" == *.h ]]; then
+          continue
+        elif [ -n "$status_label" ]; then
           echo "- [ ] ${fname} (0%, ? uncov — ${status_label})"
         else
           echo "- [ ] ${fname} (0%, ? uncov - no tests)"
